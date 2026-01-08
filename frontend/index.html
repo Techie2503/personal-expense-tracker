@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Expense Tracker PWA - Track your expenses offline-first">
+    <meta name="theme-color" content="#4CAF50">
+    <title>Expense Tracker</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="/static/styles.css">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-container">
+            <h1 class="nav-title">💰 Expense Tracker</h1>
+            <div class="sync-status" id="syncStatus">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span id="statusText">Online</span>
+            </div>
+        </div>
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-screen="add">Add Expense</button>
+            <button class="nav-tab" data-screen="list">Expenses</button>
+            <button class="nav-tab" data-screen="insights">Insights</button>
+            <button class="nav-tab" data-screen="categories">Categories</button>
+            <button class="nav-tab" data-screen="settings">Settings</button>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <main class="container">
+        <!-- Add Expense Screen -->
+        <div id="addScreen" class="screen active">
+            <div class="card">
+                <h2>Add New Expense</h2>
+                <form id="expenseForm">
+                    <div class="form-group">
+                        <label for="expenseDate">Date *</label>
+                        <input type="datetime-local" id="expenseDate" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="expenseAmount">Amount (₹) *</label>
+                        <input type="number" id="expenseAmount" step="0.01" min="0" required placeholder="0.00">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="expenseC1">Category (C1) *</label>
+                        <select id="expenseC1" required>
+                            <option value="">Select category...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="expenseC2">Subcategory (C2) *</label>
+                        <select id="expenseC2" required disabled>
+                            <option value="">Select C1 first...</option>
+                        </select>
+                        <button type="button" class="btn-link" id="addC2Btn" style="display: none;">+ Add new C2</button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="paymentMode">Payment Mode *</label>
+                        <select id="paymentMode" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Card">Card</option>
+                            <option value="UPI" selected>UPI</option>
+                            <option value="Net Banking">Net Banking</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="expensePerson">Person</label>
+                        <input type="text" id="expensePerson" placeholder="Self, Family, etc.">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="needVsWant">Need vs Want</label>
+                        <select id="needVsWant">
+                            <option value="">Not specified</option>
+                            <option value="Need">Need</option>
+                            <option value="Want">Want</option>
+                            <option value="Neutral">Neutral</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="expenseNotes">Notes</label>
+                        <textarea id="expenseNotes" rows="3" placeholder="Optional notes..."></textarea>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save Expense</button>
+                        <button type="button" class="btn btn-secondary" id="clearFormBtn">Clear</button>
+                    </div>
+                </form>
+                
+                <div id="formStatus" class="status-message" style="display: none;"></div>
+            </div>
+        </div>
+
+        <!-- Expenses List Screen -->
+        <div id="listScreen" class="screen">
+            <div class="card">
+                <div class="card-header">
+                    <div class="header-with-download">
+                        <h2>Expenses</h2>
+                        <button class="btn btn-sm btn-primary" id="downloadCsvBtn">📥 Download CSV</button>
+                    </div>
+                    <div class="filter-controls">
+                        <input type="date" id="filterStartDate" placeholder="Start Date">
+                        <input type="date" id="filterEndDate" placeholder="End Date">
+                        <button class="btn btn-sm" id="applyFilterBtn">Filter</button>
+                        <button class="btn btn-sm btn-secondary" id="clearFilterBtn">Clear</button>
+                    </div>
+                </div>
+                
+                <div id="expensesList" class="expenses-list">
+                    <div class="loading">Loading expenses...</div>
+                </div>
+                
+                <div class="pagination">
+                    <button class="btn btn-sm" id="prevPageBtn" disabled>Previous</button>
+                    <span id="pageInfo">Page 1</span>
+                    <button class="btn btn-sm" id="nextPageBtn">Next</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Insights Screen -->
+        <div id="insightsScreen" class="screen">
+            <div class="card">
+                <h2>Monthly Trend (Last 12 Months)</h2>
+                <canvas id="monthlyChart"></canvas>
+            </div>
+            
+            <div class="card">
+                <h2>Category Distribution</h2>
+                <canvas id="c1Chart"></canvas>
+            </div>
+            
+            <div class="card">
+                <h2>Subcategory Breakdown</h2>
+                <div class="form-group">
+                    <label for="c1FilterChart">Filter by Category:</label>
+                    <select id="c1FilterChart">
+                        <option value="">All Categories</option>
+                    </select>
+                </div>
+                <canvas id="c2Chart"></canvas>
+            </div>
+            
+            <div class="card">
+                <h2>Top 10 Expenses</h2>
+                <div id="topExpensesList" class="top-expenses-list">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Categories Management Screen -->
+        <div id="categoriesScreen" class="screen">
+            <div class="card">
+                <h2>Manage Categories</h2>
+                
+                <div class="section">
+                    <h3>Add New C1 Category</h3>
+                    <form id="addC1Form" class="inline-form">
+                        <input type="text" id="newC1Name" placeholder="Category name" required>
+                        <button type="submit" class="btn btn-sm btn-primary">Add C1</button>
+                    </form>
+                </div>
+                
+                <div class="section">
+                    <h3>Existing Categories</h3>
+                    <div id="categoriesList" class="categories-list">
+                        <div class="loading">Loading categories...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Screen -->
+        <div id="settingsScreen" class="screen">
+            <div class="card">
+                <h2>Settings</h2>
+                
+                <div class="section">
+                    <h3>Sync Status</h3>
+                    <p id="queueStatus">Checking queue...</p>
+                    <button class="btn btn-primary" id="syncNowBtn">Sync Now</button>
+                    <div id="syncResult" class="status-message" style="display: none; margin-top: 1rem;"></div>
+                </div>
+                
+                <div class="section">
+                    <h3>About</h3>
+                    <p>Expense Tracker PWA v1.0.0</p>
+                    <p>Offline-first expense tracking with automatic sync</p>
+                    <p>Built with FastAPI, IndexedDB, and Chart.js</p>
+                </div>
+                
+                <div class="section">
+                    <h3>Install App</h3>
+                    <button class="btn btn-primary" id="installBtn" style="display: none;">Install App</button>
+                    <p id="installStatus">App is installable from browser menu</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal for adding C2 -->
+    <div id="addC2Modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Subcategory</h3>
+                <button class="modal-close" id="closeC2Modal">&times;</button>
+            </div>
+            <form id="addC2Form">
+                <div class="form-group">
+                    <label for="newC2Name">Subcategory Name</label>
+                    <input type="text" id="newC2Name" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Add</button>
+                    <button type="button" class="btn btn-secondary" id="cancelC2Btn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
