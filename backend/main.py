@@ -330,19 +330,37 @@ def delete_expense(expense_id: int, session: Session = Depends(get_session)):
 # ============== INSIGHTS ENDPOINTS ==============
 
 @app.get("/api/insights/monthly")
-def get_monthly_insights(session: Session = Depends(get_session)):
+def get_monthly_insights(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    session: Session = Depends(get_session)
+):
     """
-    Get monthly aggregated totals for last 12 months
+    Get monthly aggregated totals
     Returns: [{month: 'YYYY-MM', total: float}, ...]
     """
-    # Calculate date 12 months ago
-    twelve_months_ago = datetime.utcnow() - timedelta(days=365)
+    # Build query with date filters
+    query = select(Expense).where(Expense.deleted == False)
     
-    expenses = session.exec(
-        select(Expense)
-        .where(and_(Expense.deleted == False, Expense.date >= twelve_months_ago))
-        .order_by(Expense.date)
-    ).all()
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.where(Expense.date >= start_dt)
+        except ValueError:
+            pass
+    else:
+        # Default to last 12 months if no start date
+        twelve_months_ago = datetime.utcnow() - timedelta(days=365)
+        query = query.where(Expense.date >= twelve_months_ago)
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.where(Expense.date <= end_dt)
+        except ValueError:
+            pass
+    
+    expenses = session.exec(query.order_by(Expense.date)).all()
     
     # Group by month
     monthly_totals = {}
@@ -360,12 +378,16 @@ def get_monthly_insights(session: Session = Depends(get_session)):
 
 
 @app.get("/api/insights/c1-distribution")
-def get_c1_distribution(session: Session = Depends(get_session)):
+def get_c1_distribution(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    session: Session = Depends(get_session)
+):
     """
     Get total spending per C1 category
     Returns: [{c1_id: int, c1_name: str, total: float}, ...]
     """
-    # Join expenses with C1 categories and aggregate
+    # Build base query
     query = (
         select(
             Expense.c1_id,
@@ -374,9 +396,24 @@ def get_c1_distribution(session: Session = Depends(get_session)):
         )
         .join(Category1, Expense.c1_id == Category1.id)
         .where(Expense.deleted == False)
-        .group_by(Expense.c1_id, Category1.name)
-        .order_by(func.sum(Expense.amount).desc())
     )
+    
+    # Apply date filters
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.where(Expense.date >= start_dt)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.where(Expense.date <= end_dt)
+        except ValueError:
+            pass
+    
+    query = query.group_by(Expense.c1_id, Category1.name).order_by(func.sum(Expense.amount).desc())
     
     results = session.exec(query).all()
     
@@ -389,11 +426,13 @@ def get_c1_distribution(session: Session = Depends(get_session)):
 @app.get("/api/insights/c2-breakdown")
 def get_c2_breakdown(
     c1_id: Optional[int] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     session: Session = Depends(get_session)
 ):
     """
     Get total spending per C2 category
-    Optionally filter by C1
+    Optionally filter by C1 and date range
     Returns: [{c2_id: int, c2_name: str, total: float}, ...]
     """
     query = (
@@ -408,6 +447,21 @@ def get_c2_breakdown(
     
     if c1_id is not None:
         query = query.where(Expense.c1_id == c1_id)
+    
+    # Apply date filters
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.where(Expense.date >= start_dt)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.where(Expense.date <= end_dt)
+        except ValueError:
+            pass
     
     query = query.group_by(Expense.c2_id, Category2.name).order_by(func.sum(Expense.amount).desc())
     

@@ -583,6 +583,24 @@ async function downloadExpensesCSV() {
 
 // ==================== INSIGHTS SCREEN ====================
 /**
+ * Get date filter parameters for insights
+ */
+function getInsightsDateParams() {
+    const params = new URLSearchParams();
+    const startDate = document.getElementById('insightsStartDate').value;
+    const endDate = document.getElementById('insightsEndDate').value;
+    
+    if (startDate) {
+        params.append('start_date', new Date(startDate).toISOString());
+    }
+    if (endDate) {
+        params.append('end_date', new Date(endDate).toISOString());
+    }
+    
+    return params.toString();
+}
+
+/**
  * Load all insights and charts
  */
 async function loadInsights() {
@@ -600,7 +618,8 @@ async function loadInsights() {
  */
 async function loadMonthlyChart() {
     try {
-        const data = await apiFetch('/insights/monthly');
+        const dateParams = getInsightsDateParams();
+        const data = await apiFetch(`/insights/monthly${dateParams ? '?' + dateParams : ''}`);
         
         const ctx = document.getElementById('monthlyChart');
         
@@ -648,7 +667,8 @@ async function loadMonthlyChart() {
  */
 async function loadC1Chart() {
     try {
-        const data = await apiFetch('/insights/c1-distribution');
+        const dateParams = getInsightsDateParams();
+        const data = await apiFetch(`/insights/c1-distribution${dateParams ? '?' + dateParams : ''}`);
         
         const ctx = document.getElementById('c1Chart');
         
@@ -688,7 +708,13 @@ async function loadC1Chart() {
  */
 async function loadC2Chart(c1Id = null) {
     try {
-        const url = c1Id ? `/insights/c2-breakdown?c1_id=${c1Id}` : '/insights/c2-breakdown';
+        const dateParams = getInsightsDateParams();
+        let url = '/insights/c2-breakdown?';
+        if (c1Id) url += `c1_id=${c1Id}&`;
+        if (dateParams) url += dateParams;
+        // Remove trailing & or ?
+        url = url.replace(/[&?]$/, '');
+        
         const data = await apiFetch(url);
         
         const ctx = document.getElementById('c2Chart');
@@ -1180,6 +1206,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('c1FilterChart').addEventListener('change', (e) => {
         const c1Id = e.target.value;
         loadC2Chart(c1Id || null);
+    });
+    
+    // Insights date filters
+    document.getElementById('applyInsightsFilterBtn').addEventListener('click', () => {
+        loadInsights();
+    });
+    
+    document.getElementById('clearInsightsFilterBtn').addEventListener('click', () => {
+        document.getElementById('insightsStartDate').value = '';
+        document.getElementById('insightsEndDate').value = '';
+        loadInsights();
     });
     
     // Settings sync button

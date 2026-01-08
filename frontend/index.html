@@ -141,6 +141,17 @@
 
         <!-- Insights Screen -->
         <div id="insightsScreen" class="screen">
+            <!-- Date Filter Card -->
+            <div class="card">
+                <h3>Filter Insights by Date</h3>
+                <div class="filter-controls">
+                    <input type="date" id="insightsStartDate" placeholder="Start Date">
+                    <input type="date" id="insightsEndDate" placeholder="End Date">
+                    <button class="btn btn-sm btn-primary" id="applyInsightsFilterBtn">Apply Filter</button>
+                    <button class="btn btn-sm btn-secondary" id="clearInsightsFilterBtn">Clear Filter</button>
+                </div>
+            </div>
+            
             <div class="card">
                 <h2>Monthly Trend (Last 12 Months)</h2>
                 <canvas id="monthlyChart"></canvas>
