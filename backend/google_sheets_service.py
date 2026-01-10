@@ -195,7 +195,7 @@ class GoogleSheetsService:
             expenses_title = f"{user_id} - Expenses"
             expenses_sheet = self.sa_client.create(expenses_title)
             expenses_worksheet = expenses_sheet.get_worksheet(0)
-            expenses_worksheet.update('A1:H1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want']])
+            expenses_worksheet.update('A1:I1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want', 'created_at']])
             
             logger.info(f"Created Expenses sheet: {expenses_sheet.id}")
             
@@ -282,7 +282,7 @@ class GoogleSheetsService:
         """Initialize expenses sheet with headers"""
         try:
             sheet = self.sa_client.open_by_key(sheet_id).get_worksheet(0)
-            sheet.update('A1:H1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want']])
+            sheet.update('A1:I1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want', 'created_at']])
             logger.info(f"Initialized expenses sheet headers: {sheet_id}")
         except Exception as e:
             logger.error(f"Error initializing expenses sheet: {e}")
@@ -364,6 +364,7 @@ class GoogleSheetsService:
             raise
 
     def append_expense(self, sheet_id: str, expense_data: Dict):
+        """Append expense to Google Sheets (matches 9-column header)"""
         sheet = self.sa_client.open_by_key(sheet_id).sheet1
         sheet.append_row([
             expense_data.get("date"),
@@ -374,7 +375,7 @@ class GoogleSheetsService:
             expense_data.get("notes"),
             expense_data.get("person"),
             expense_data.get("need_vs_want"),
-            expense_data.get("created_at")
+            expense_data.get("created_at")  # Timestamp for tracking
         ])
 
     def update_category_status(self, sheet_id: str, c2_name: str, is_active: bool):
