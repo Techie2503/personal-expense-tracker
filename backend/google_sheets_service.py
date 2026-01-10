@@ -403,6 +403,8 @@ class GoogleSheetsService:
             sheet = self.sa_client.open_by_key(sheet_id).sheet1
             all_values = sheet.get_all_values()
             
+            logger.info(f"Searching for expense to delete: date={expense_date}, amount={amount}, c2={c2_name}")
+            
             # Skip header row, find matching expense
             for i, row in enumerate(all_values[1:], start=2):  # Start from row 2 (1-indexed)
                 if len(row) >= 10:
@@ -411,17 +413,27 @@ class GoogleSheetsService:
                     row_amount = row[1]
                     row_c2 = row[3]
                     
-                    # Convert amount to string for comparison
-                    if row_date == expense_date and str(row_amount) == str(amount) and row_c2 == c2_name:
+                    logger.debug(f"Checking row {i}: date={row_date}, amount={row_amount}, c2={row_c2}")
+                    
+                    # More flexible date matching (try both formats)
+                    date_matches = (row_date == expense_date or 
+                                   row_date.startswith(expense_date.split('T')[0]))  # Match date part only
+                    amount_matches = str(row_amount) == str(amount) or float(row_amount) == float(amount)
+                    c2_matches = row_c2 == c2_name
+                    c1_matches = row_c1 == c1_name
+                    
+                    if date_matches and amount_matches and c2_matches and c1_matches:
                         # Update column J (deleted) to "true"
                         sheet.update_cell(i, 10, "true")
-                        logger.info(f"Marked expense as deleted in Sheets: {expense_date}, {amount}, {c2_name}")
+                        logger.info(f"✅ Marked expense as deleted in Sheets at row {i}")
                         return True
             
-            logger.warning(f"Expense not found in sheet: {expense_date}, {amount}, {c2_name}")
+            logger.warning(f"❌ Expense not found in sheet: {expense_date}, {amount}, {c2_name}")
             return False
         except Exception as e:
             logger.error(f"Error marking expense as deleted: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
 
