@@ -349,6 +349,20 @@ class GoogleSheetsService:
     def load_expenses(self, sheet_id: str) -> List[Dict]:
         return self.sa_client.open_by_key(sheet_id).sheet1.get_all_records()
 
+    def append_category(self, sheet_id: str, category_data: Dict):
+        """Append a new category row to Google Sheets"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            sheet.append_row([
+                category_data.get("c1_name"),
+                category_data.get("c2_name"),
+                category_data.get("is_active", "true")
+            ])
+            logger.info(f"Appended category to sheet {sheet_id}")
+        except Exception as e:
+            logger.error(f"Error appending category: {e}")
+            raise
+
     def append_expense(self, sheet_id: str, expense_data: Dict):
         sheet = self.sa_client.open_by_key(sheet_id).sheet1
         sheet.append_row([

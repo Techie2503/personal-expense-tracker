@@ -247,6 +247,17 @@ def create_category(
     session.refresh(db_category)
     
     logger.info(f"Created C1 category: {db_category.name} for user {user_id}")
+    
+    # Sync to Google Sheets
+    try:
+        user = session.get(User, user_id)
+        if user and user.categories_sheet_id != "local":
+            # Note: C1 alone can't be added to sheets (needs C2)
+            # We'll add a placeholder C2 or just log
+            logger.info(f"C1 created but needs C2 to sync to Sheets")
+    except Exception as e:
+        logger.error(f"Error syncing C1 to sheets: {e}")
+    
     return db_category
 
 
@@ -295,6 +306,24 @@ def create_c2_category(
     session.refresh(db_category)
     
     logger.info(f"Created C2 category: {db_category.name} for user {user_id}")
+    
+    # Sync to Google Sheets
+    try:
+        user = session.get(User, user_id)
+        if user and user.categories_sheet_id != "local":
+            # Append new category to Google Sheets
+            google_sheets_service.append_category(
+                user.categories_sheet_id,
+                {
+                    "c1_name": c1.name,
+                    "c2_name": db_category.name,
+                    "is_active": "true"
+                }
+            )
+            logger.info(f"Synced new C2 to Google Sheets: {c1.name}/{db_category.name}")
+    except Exception as e:
+        logger.error(f"Error syncing C2 to sheets: {e}")
+    
     return db_category
 
 
