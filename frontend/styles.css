@@ -58,6 +58,8 @@ body {
     padding: 0.75rem 1rem;
     max-width: 1200px;
     margin: 0 auto;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .nav-title {
@@ -65,6 +67,30 @@ body {
     font-weight: 600;
     flex: 1;
     min-width: 0;
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+}
+
+.user-picture {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid white;
+}
+
+.user-email {
+    color: white;
+    font-size: 0.8rem;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .sync-status {

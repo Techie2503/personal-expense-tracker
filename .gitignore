@@ -42,6 +42,18 @@ expenses.db
 .env.local
 .env.*.local
 
+# Google Service Account Keys (CRITICAL - NEVER COMMIT)
+service-account.json
+service-account-new.json
+*-service-account.json
+credentials.json
+*-credentials.json
+*.json.key
+
+# User data mappings
+user_sheets_mapping.json
+user_sheet_mapping.json
+
 # Logs
 *.log
 

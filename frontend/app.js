@@ -1,6 +1,6 @@
 /**
- * Expense Tracker PWA - Main Application
- * Features: Offline-first with IndexedDB, Auto-sync, Charts
+ * Expense Tracker PWA - Main Application (Multi-User)
+ * Features: Offline-first with IndexedDB, Auto-sync, Charts, Google Auth
  */
 
 // ==================== CONFIGURATION ====================
@@ -19,6 +19,99 @@ let c1Categories = [];
 let c2Categories = [];
 let charts = {};
 let deferredPrompt = null;
+let currentUser = null;  // Current logged-in user
+
+// ==================== AUTHENTICATION ====================
+/**
+ * Get current user from localStorage
+ */
+function getCurrentUser() {
+    try {
+        const userData = localStorage.getItem('expense_tracker_user');
+        if (userData) {
+            return JSON.parse(userData);
+        }
+    } catch (e) {
+        console.error('Error reading user data:', e);
+        localStorage.removeItem('expense_tracker_user');
+    }
+    return null;
+}
+
+/**
+ * Get user ID for API calls
+ */
+function getUserId() {
+    if (!currentUser) {
+        currentUser = getCurrentUser();
+    }
+    return currentUser ? currentUser.user_id : null;
+}
+
+/**
+ * Check if user is authenticated
+ */
+function checkAuth() {
+    currentUser = getCurrentUser();
+    
+    if (!currentUser) {
+        // Not logged in - redirect to login page
+        console.log('Not authenticated, redirecting to login...');
+        window.location.href = '/';
+        return false;
+    }
+    
+    console.log('User authenticated:', currentUser.email);
+    return true;
+}
+
+/**
+ * Logout user
+ */
+async function logout() {
+    if (!confirm('Are you sure you want to logout?')) {
+        return;
+    }
+    
+    try {
+        // Clear local storage
+        localStorage.removeItem('expense_tracker_user');
+        
+        // Clear IndexedDB
+        if (db) {
+            indexedDB.deleteDatabase(DB_NAME);
+        }
+        
+        // Call logout endpoint
+        await apiFetch('/auth/logout', { method: 'POST' });
+        
+        // Redirect to login
+        window.location.href = '/';
+        
+    } catch (error) {
+        console.error('Logout error:', error);
+        // Force redirect anyway
+        window.location.href = '/';
+    }
+}
+
+/**
+ * Update user info in navbar
+ */
+function updateUserInfo() {
+    if (!currentUser) return;
+    
+    const userEmailEl = document.getElementById('userEmail');
+    if (userEmailEl) {
+        userEmailEl.textContent = currentUser.email;
+    }
+    
+    const userPictureEl = document.getElementById('userPicture');
+    if (userPictureEl && currentUser.picture) {
+        userPictureEl.src = currentUser.picture;
+        userPictureEl.style.display = 'block';
+    }
+}
 
 // ==================== INDEXEDDB SETUP ====================
 /**
@@ -93,11 +186,21 @@ function removeFromQueue(id) {
 
 // ==================== API FUNCTIONS ====================
 /**
- * Generic API fetch with error handling
+ * Generic API fetch with error handling and user context
  */
 async function apiFetch(endpoint, options = {}) {
     try {
-        const response = await fetch(`${API_BASE}${endpoint}`, {
+        const userId = getUserId();
+        
+        // Add user_id to query params for GET requests or requests without body
+        let url = `${API_BASE}${endpoint}`;
+        
+        if (userId && (options.method === 'GET' || !options.method)) {
+            const separator = endpoint.includes('?') ? '&' : '?';
+            url += `${separator}user_id=${encodeURIComponent(userId)}`;
+        }
+        
+        const response = await fetch(url, {
             ...options,
             headers: {
                 'Content-Type': 'application/json',
@@ -115,6 +218,47 @@ async function apiFetch(endpoint, options = {}) {
         console.error('API Error:', error);
         throw error;
     }
+}
+
+/**
+ * API POST with user context in body
+ */
+async function apiPost(endpoint, data) {
+    const userId = getUserId();
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const url = `${endpoint}${separator}user_id=${encodeURIComponent(userId)}`;
+    
+    return apiFetch(url, {
+        method: 'POST',
+        body: JSON.stringify(data)
+    });
+}
+
+/**
+ * API PUT with user context in body
+ */
+async function apiPut(endpoint, data) {
+    const userId = getUserId();
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const url = `${endpoint}${separator}user_id=${encodeURIComponent(userId)}`;
+    
+    return apiFetch(url, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+    });
+}
+
+/**
+ * API DELETE with user context
+ */
+async function apiDelete(endpoint) {
+    const userId = getUserId();
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const url = `${endpoint}${separator}user_id=${encodeURIComponent(userId)}`;
+    
+    return apiFetch(url, {
+        method: 'DELETE'
+    });
 }
 
 // ==================== SYNC FUNCTIONALITY ====================
@@ -140,10 +284,7 @@ async function syncQueuedExpenses() {
                 const { id, timestamp, ...expense } = item;
                 
                 // Post to server
-                await apiFetch('/expenses', {
-                    method: 'POST',
-                    body: JSON.stringify(expense)
-                });
+                await apiPost('/expenses', expense);
                 
                 // Remove from queue on success
                 await removeFromQueue(id);
@@ -327,16 +468,13 @@ async function loadC2Categories(c1Id) {
 async function handleExpenseSubmit(event) {
     event.preventDefault();
     
-    // Get the datetime-local value and preserve it as local time
+    // Get the datetime-local value and send it as-is (local time)
     const dateInput = document.getElementById('expenseDate').value;
     // datetime-local format: "2026-01-08T15:30"
-    // We want to send this exact time to the server, not convert to UTC
-    const localDate = new Date(dateInput);
-    // Create ISO string but treat as local time (don't shift to UTC)
-    const dateString = localDate.toISOString();
+    // Send directly - FastAPI will parse it as local time
     
     const formData = {
-        date: dateString,
+        date: dateInput,  // Send the raw datetime-local string
         amount: parseFloat(document.getElementById('expenseAmount').value),
         c1_id: parseInt(document.getElementById('expenseC1').value),
         c2_id: parseInt(document.getElementById('expenseC2').value),
@@ -349,10 +487,7 @@ async function handleExpenseSubmit(event) {
     try {
         if (isOnline) {
             // Try to post to server
-            await apiFetch('/expenses', {
-                method: 'POST',
-                body: JSON.stringify(formData)
-            });
+            await apiPost('/expenses', formData);
             showStatus('formStatus', '✅ Expense saved successfully!', 'success');
         } else {
             // Queue for later sync
@@ -385,7 +520,26 @@ function setDefaultDateTime() {
     const localDateTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
         .toISOString()
         .slice(0, 16);
-    document.getElementById('expenseDate').value = localDateTime;
+    const dateInput = document.getElementById('expenseDate');
+    if (dateInput) {
+        // Set value multiple ways to ensure it sticks
+        dateInput.value = localDateTime;
+        dateInput.setAttribute('value', localDateTime);
+        dateInput.defaultValue = localDateTime;
+        
+        // Force Chrome to re-render by focusing and blurring
+        dateInput.focus();
+        dateInput.blur();
+        
+        // Trigger events
+        dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+        dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        console.log('✅ Default date set to:', localDateTime);
+        console.log('✅ Input value is now:', dateInput.value);
+    } else {
+        console.error('❌ expenseDate input not found!');
+    }
 }
 
 // ==================== EXPENSES LIST SCREEN ====================
@@ -483,7 +637,7 @@ async function deleteExpense(id) {
     if (!confirm('Delete this expense?')) return;
     
     try {
-        await apiFetch(`/expenses/${id}`, { method: 'DELETE' });
+        await apiDelete(`/expenses/${id}`);
         showStatus('formStatus', 'Expense deleted', 'success');
         await loadExpenses();
     } catch (error) {
@@ -900,10 +1054,7 @@ async function addNewC1() {
     }
     
     try {
-        await apiFetch('/categories', {
-            method: 'POST',
-            body: JSON.stringify({ name })
-        });
+        await apiPost('/categories', { name });
         
         nameInput.value = '';
         await loadCategoriesManagement();
@@ -917,10 +1068,7 @@ async function addNewC1() {
  */
 async function toggleC1Active(id, active) {
     try {
-        await apiFetch(`/categories/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ active })
-        });
+        await apiPut(`/categories/${id}`, { active });
         
         await loadCategoriesManagement();
     } catch (error) {
@@ -941,10 +1089,7 @@ async function addNewC2(c1Id) {
     }
     
     try {
-        await apiFetch(`/categories/${c1Id}/c2`, {
-            method: 'POST',
-            body: JSON.stringify({ name })
-        });
+        await apiPost(`/categories/${c1Id}/c2`, { name });
         
         nameInput.value = '';
         await loadCategoriesManagement();
@@ -958,10 +1103,7 @@ async function addNewC2(c1Id) {
  */
 async function toggleC2Active(id, active) {
     try {
-        await apiFetch(`/categories/c2/${id}`, {
-            method: 'PUT',
-            body: JSON.stringify({ active })
-        });
+        await apiPut(`/categories/c2/${id}`, { active });
         
         await loadCategoriesManagement();
     } catch (error) {
@@ -1092,8 +1234,10 @@ async function initApp() {
     // Update online status
     updateOnlineStatus();
     
-    // Set default date/time
-    setDefaultDateTime();
+    // Set default date/time (with slight delay to ensure DOM is ready)
+    setTimeout(() => {
+        setDefaultDateTime();
+    }, 100);
     
     // Load initial screen data
     await loadScreenData('add');
@@ -1108,12 +1252,26 @@ async function initApp() {
 
 // ==================== EVENT LISTENERS ====================
 document.addEventListener('DOMContentLoaded', () => {
+    // Check authentication first
+    if (!checkAuth()) {
+        return; // User will be redirected to login
+    }
+    
+    // Update user info in navbar
+    updateUserInfo();
+    
     // Navigation tabs
     document.querySelectorAll('.nav-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             switchScreen(tab.dataset.screen);
         });
     });
+    
+    // Logout button
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', logout);
+    }
     
     // Expense form
     document.getElementById('expenseForm').addEventListener('submit', handleExpenseSubmit);
@@ -1150,10 +1308,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!name || !c1Id) return;
         
         try {
-            const newC2 = await apiFetch(`/categories/${c1Id}/c2`, {
-                method: 'POST',
-                body: JSON.stringify({ name })
-            });
+            const newC2 = await apiPost(`/categories/${c1Id}/c2`, { name });
             
             // Reload C2 and select the new one
             await loadC2Categories(c1Id);
