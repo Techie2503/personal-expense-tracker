@@ -1,9 +1,12 @@
-# 💰 Expense Tracker PWA
+# 💰 Expense Tracker PWA (Multi-User with OAuth)
 
-A complete, offline-first Progressive Web App (PWA) for tracking expenses with automatic sync, charts, and category management. Built with FastAPI backend and vanilla JavaScript frontend.
+A complete, offline-first Progressive Web App (PWA) for tracking expenses with **Google OAuth Login**, **user-owned Google Sheets**, automatic sync, charts, and category management. Built with FastAPI backend and vanilla JavaScript frontend.
 
 ## ✨ Features
 
+- 🔐 **Google OAuth Login** - Secure authentication with Drive & Sheets access
+- ☁️ **Google Sheets in YOUR Drive** - Data stored in your own Google Drive (no quota issues!)
+- 👥 **Multi-User Support** - Each user has their own data in their own Drive
 - 📱 **PWA** - Installable on mobile devices
 - 🔄 **Offline-first** - Works without internet, syncs when online
 - 📊 **Charts & Insights** - Monthly trends, category distribution, top expenses
@@ -12,47 +15,155 @@ A complete, offline-first Progressive Web App (PWA) for tracking expenses with a
 - 🎨 **Responsive UI** - Mobile-first design
 - 🚀 **Fast** - Single-page app with <10 second expense entry
 - 🌐 **Single Service** - Backend serves both API and frontend
+- ♻️ **Redeploy-safe** - Data survives server restarts and redeployments
 
 ## 🛠️ Tech Stack
 
 - **Backend**: FastAPI (Python 3.10+)
-- **Database**: SQLite with SQLModel
+- **Database**: SQLite (temporary runtime cache)
+- **Persistence**: Google Sheets API (user's Drive)
+- **Authentication**: Google OAuth 2.0 with Drive & Sheets scopes
 - **Frontend**: HTML, CSS, Vanilla JavaScript
 - **Charts**: Chart.js
 - **Offline**: IndexedDB + Service Worker
-- **Deployment**: Render-ready with persistent disk support
+- **Deployment**: Render-ready
 
-## 📦 Installation & Local Setup
+## 🔧 Prerequisites
 
-### Prerequisites
+Before setting up the app locally or deploying, you need to:
 
-- Python 3.10 or higher
-- pip
-- Modern web browser
+1. **Python 3.10 or higher**
+2. **Google Cloud Console Account**
+3. **Google OAuth Client ID** (for user login with Drive/Sheets access)
+4. **Google Service Account** (for backend read/write operations)
 
-### Quick Start (3 Commands)
+## 📋 Google Cloud Setup (REQUIRED)
 
-1. **Clone and navigate:**
-   ```bash
-   cd /path/to/expense_tracker
-   ```
+### Step 1: Create a Google Cloud Project
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (e.g., "Expense Tracker")
+3. Note the **Project ID**
+
+### Step 2: Enable Required APIs
+
+Enable these APIs in your project:
+
+1. **Google Sheets API**
+   - Go to: APIs & Services → Library
+   - Search "Google Sheets API"
+   - Click "Enable"
+
+2. **Google Drive API**
+   - Search "Google Drive API"
+   - Click "Enable"
+
+### Step 3: Create OAuth 2.0 Client ID (for User Login)
+
+1. Go to: APIs & Services → Credentials
+2. Click **"Create Credentials"** → **"OAuth client ID"**
+3. If prompted, configure the OAuth consent screen:
+   - User Type: **External**
+   - App name: **Expense Tracker**
+   - User support email: **your-email@gmail.com**
+   - Developer contact: **your-email@gmail.com**
+   - **Scopes**: Add the following scopes:
+     - `https://www.googleapis.com/auth/userinfo.email`
+     - `https://www.googleapis.com/auth/userinfo.profile`
+     - `https://www.googleapis.com/auth/drive.file`
+     - `https://www.googleapis.com/auth/spreadsheets`
+   - Test users: Add your Gmail address (if app is in "Testing" mode)
+   - Save and Continue
+
+4. Create OAuth Client ID:
+   - Application type: **Web application**
+   - Name: **Expense Tracker Web Client**
+   - Authorized JavaScript origins:
+     ```
+     http://localhost:8000
+     https://your-app-name.onrender.com
+     ```
+   - Authorized redirect URIs:
+     ```
+     http://localhost:8000
+     https://your-app-name.onrender.com
+     ```
+   - Authorized redirect URIs:
+     ```
+     http://localhost:8000
+     https://your-app-name.onrender.com
+     ```
+   - Click **Create**
+
+5. **Copy the Client ID** (looks like: `123456789-abcdefg.apps.googleusercontent.com`)
+   - Save this for the `GOOGLE_CLIENT_ID` environment variable
+
+### Step 4: Create Service Account (for Backend API Access)
+
+1. Go to: APIs & Services → Credentials
+2. Click **"Create Credentials"** → **"Service Account"**
+3. Service account details:
+   - Name: **expense-tracker-service**
+   - ID: (auto-generated)
+   - Click **Create and Continue**
+
+4. Grant this service account access (optional, skip):
+   - Click **Continue**
+   - Click **Done**
+
+5. Create and download the key:
+   - Click on the newly created service account
+   - Go to **"Keys"** tab
+   - Click **"Add Key"** → **"Create new key"**
+   - Key type: **JSON**
+   - Click **Create**
+   - The JSON file will download (e.g., `expense-tracker-service-abc123.json`)
+
+6. **Save this JSON file securely** - you'll need it for the `GOOGLE_APPLICATION_CREDENTIALS` environment variable
+
+⚠️ **IMPORTANT**: Keep this JSON file secret! It provides programmatic access to Google APIs.
+
+### Step 5: Share Sheets Access (will be automatic)
+
+The service account email (found in the JSON file, looks like `expense-tracker-service@your-project.iam.gserviceaccount.com`) will automatically create sheets and give itself access. No manual sharing needed!
+
+---
+
+## 📦 Local Installation & Setup
+
+### Quick Start (3 Steps)
+
+1. **Set up environment variables:**
+
+Create a `.env` file in the project root:
+
+```bash
+# .env
+GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
+GOOGLE_APPLICATION_CREDENTIALS=./path-to-service-account.json
+ENVIRONMENT=development
+DATABASE_URL=sqlite:///./expenses.db
+PORT=8000
+```
+
+Replace:
+- `GOOGLE_CLIENT_ID` with your OAuth Client ID from Step 3
+- `GOOGLE_APPLICATION_CREDENTIALS` with the path to your service account JSON file from Step 4
 
 2. **Run the setup script:**
-   ```bash
-   chmod +x run_local.sh
-   ./run_local.sh
-   ```
+
+```bash
+chmod +x run_local.sh
+./run_local.sh
+```
 
 3. **Open your browser:**
-   ```
-   http://localhost:8000
-   ```
 
-The script will:
-- Create a virtual environment
-- Install all dependencies
-- Set up the database
-- Start the server with auto-reload
+```
+http://localhost:8000
+```
+
+You'll be greeted with the **Google Login** page!
 
 ### Manual Setup (Alternative)
 
@@ -64,497 +175,406 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Set database URL (optional, defaults to sqlite:///./expenses.db)
+# Set environment variables
+export GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+export GOOGLE_APPLICATION_CREDENTIALS="./service-account.json"
+export ENVIRONMENT="development"
 export DATABASE_URL="sqlite:///./expenses.db"
 
 # Run the server
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-## 🌱 Seeding the Database
+---
 
-The app includes a canonical taxonomy with 10 C1 categories and their subcategories.
+## 🚀 Deployment to Render
 
-### Option 1: Via API Endpoint
-```bash
-curl -X POST http://localhost:8000/api/seed
-```
-
-### Option 2: Via Web UI
-1. Open http://localhost:8000
-2. Navigate to the browser console
-3. The database will auto-create tables on startup
-4. Click the seed endpoint or use the curl command above
-
-### Option 3: Via Python Script
-```bash
-source venv/bin/activate
-python -c "from backend.database import create_db_and_tables; from backend.seed import seed_database; create_db_and_tables(); seed_database()"
-```
-
-The seed will create:
-- 10 C1 categories (Food, Transport, Health & Fitness, etc.)
-- 45+ C2 subcategories
-- 50 sample expenses for the last 3 months
-
-## 📱 Using the App
-
-### Add Expense (Main Screen)
-1. Date is pre-filled with current time
-2. Enter amount
-3. Select C1 category → C2 subcategory auto-populates
-4. Choose payment mode (Cash/Card/UPI/Net Banking)
-5. Optional: Add person, need vs want, notes
-6. Click "Save" - Takes <10 seconds total!
-
-**Offline Mode**: If offline, expense is saved to IndexedDB and queued for sync.
-
-### View Expenses
-- Browse all expenses with pagination
-- Filter by date range
-- Delete expenses (soft delete)
-
-### Insights & Charts
-- **Monthly Trend**: Line chart of last 12 months
-- **C1 Distribution**: Pie chart of spending by category
-- **C2 Breakdown**: Bar chart of subcategories (filterable)
-- **Top 10 Expenses**: Table of highest expenses
-
-### Manage Categories
-- Add new C1 categories
-- Add C2 subcategories under any C1
-- Enable/disable categories (doesn't delete, just hides)
-
-### Settings
-- View sync queue status
-- Manual sync button
-- Install PWA button
-- App information
-
-## 🔄 Offline & Sync Behavior
-
-### How Offline Works
-1. **Network Available**: Expenses POST directly to API
-2. **Network Unavailable**: Expenses saved to IndexedDB queue
-3. **Network Restored**: Auto-sync triggers, pushes queue to server
-4. **Service Worker**: Caches app shell for instant offline loading
-
-### Testing Offline Mode
-1. Open app in browser
-2. Open DevTools → Network tab
-3. Check "Offline" checkbox
-4. Add an expense - see "Saved offline" message
-5. Go to Settings → See queue count
-6. Uncheck "Offline"
-7. Click "Sync Now" or wait for auto-sync
-8. Expense appears in server database
-
-### Background Sync
-The service worker implements:
-- Cache-first strategy for static files
-- Network-first strategy for API calls
-- Background sync API (where supported)
-- Fallback periodic sync on page load
-
-## 🚀 Deploy to Render
+### Prerequisites
+- Render account (free tier works!)
+- GitHub repository with this code
+- Google Cloud setup completed (Steps 1-5 above)
 
 ### Step-by-Step Deployment
 
-#### 1. Prepare Repository
-```bash
-# Initialize git (if not already done)
-git init
-git add .
-git commit -m "Initial commit: Expense Tracker PWA"
+1. **Push your code to GitHub**
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git remote add origin https://github.com/your-username/expense-tracker.git
+   git push -u origin main
+   ```
 
-# Push to GitHub
-git remote add origin https://github.com/yourusername/expense-tracker.git
-git push -u origin main
+2. **Create a New Web Service on Render**
+   - Go to [Render Dashboard](https://dashboard.render.com/)
+   - Click **"New +"** → **"Web Service"**
+   - Connect your GitHub repository
+   - Select the `expense_tracker` repository
+
+3. **Configure the Service**
+   - **Name**: `expense-tracker` (or your choice)
+   - **Region**: Choose closest to you
+   - **Branch**: `main`
+   - **Runtime**: `Python 3`
+   - **Build Command**:
+     ```bash
+     pip install -r requirements.txt
+     ```
+   - **Start Command**:
+     ```bash
+     uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+     ```
+   - **Instance Type**: `Free` (or paid for better performance)
+
+4. **Set Environment Variables**
+
+   Click **"Advanced"** → **"Add Environment Variable"**
+
+   Add these variables:
+
+   | Key | Value |
+   |-----|-------|
+   | `GOOGLE_CLIENT_ID` | Your OAuth Client ID from Step 3 |
+   | `GOOGLE_APPLICATION_CREDENTIALS` | See note below ⚠️ |
+   | `ENVIRONMENT` | `production` |
+   | `DATABASE_URL` | `sqlite:////tmp/expenses.db` |
+   | `PORT` | `10000` (auto-set by Render) |
+
+   ⚠️ **For `GOOGLE_APPLICATION_CREDENTIALS` on Render:**
+
+   You have two options:
+
+   **Option A: Inline JSON (Simpler)**
+   - Copy the ENTIRE contents of your service account JSON file
+   - Create an environment variable named `GOOGLE_SERVICE_ACCOUNT_JSON`
+   - Paste the JSON content as the value
+   - Update `backend/google_sheets_service.py` to read from this env var instead of a file
+
+   **Option B: File Upload (More Secure)**
+   - Use Render's persistent disk (see next step)
+   - Upload the JSON file to `/data/service-account.json`
+   - Set `GOOGLE_APPLICATION_CREDENTIALS=/data/service-account.json`
+
+   For simplicity, I recommend **Option A**. Here's how to modify the code:
+
+   In `backend/google_sheets_service.py`, change the initialization:
+
+   ```python
+   import json
+   import os
+   
+   # ... existing imports ...
+
+   def _initialize_service():
+       try:
+           # Try loading from environment variable first (Render)
+           service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+           if service_account_json:
+               credentials_dict = json.loads(service_account_json)
+               credentials = service_account.Credentials.from_service_account_info(
+                   credentials_dict,
+                   scopes=SCOPES
+               )
+           else:
+               # Fall back to file (local development)
+               credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+               credentials = service_account.Credentials.from_service_account_file(
+                   credentials_path,
+                   scopes=SCOPES
+               )
+           # ... rest of initialization ...
+   ```
+
+5. **Update OAuth Authorized Origins**
+   - Go back to Google Cloud Console → APIs & Services → Credentials
+   - Edit your OAuth Client ID
+   - Add to **Authorized JavaScript origins**:
+     ```
+     https://your-app-name.onrender.com
+     ```
+   - Add to **Authorized redirect URIs**:
+     ```
+     https://your-app-name.onrender.com
+     ```
+   - Save
+
+6. **Deploy!**
+   - Click **"Create Web Service"**
+   - Render will build and deploy your app
+   - Wait for the build to complete (2-5 minutes)
+
+7. **First Time Setup**
+   - Visit `https://your-app-name.onrender.com`
+   - You'll see the Google Login page
+   - Sign in with your Google account
+   - The app will automatically:
+     - Create Google Sheets for you (Categories & Expenses)
+     - Seed default categories
+     - Load the app
+
+8. **Add Test Users** (if using OAuth consent screen in Testing mode)
+   - Go to Google Cloud Console → APIs & Services → OAuth consent screen
+   - Add test users (Gmail addresses that can access the app)
+
+---
+
+## 📱 Using the App
+
+### First Login
+1. Visit the app URL
+2. Click "Sign in with Google"
+3. Authorize the app
+4. Your account is created with default categories
+
+### Adding Expenses
+1. Navigate to **"Add Expense"** tab
+2. Fill in:
+   - Date (pre-filled with current time)
+   - Amount
+   - Category (C1)
+   - Subcategory (C2) - auto-populated based on C1
+   - Payment mode
+   - Notes (optional)
+3. Click **"Save Expense"**
+4. Works offline! Syncs when you're back online.
+
+### Viewing Expenses
+- **Expenses** tab: List all expenses, paginated
+- Filter by date range
+- Delete expenses
+- Download CSV export
+
+### Insights
+- **Insights** tab shows:
+  - Monthly trend (last 12 months)
+  - C1 category distribution (pie chart)
+  - C2 subcategory breakdown (bar chart)
+  - Top 10 expenses
+- Filter charts by date range
+
+### Managing Categories
+- **Categories** tab:
+  - View all C1 and C2 categories
+  - Add new categories/subcategories
+  - Activate/deactivate categories
+  - Categories are synced to Google Sheets
+
+### Settings
+- **Settings** tab:
+  - Sync queued offline expenses
+  - Install app as PWA
+  - View sync status
+
+---
+
+## 🏗️ Architecture Overview
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────┐
+│           User Browser                  │
+│  (PWA with IndexedDB for offline)       │
+└───────────────┬─────────────────────────┘
+                │
+                ↓
+┌─────────────────────────────────────────┐
+│         FastAPI Backend                 │
+│     (SQLite as runtime cache)           │
+└───────────────┬─────────────────────────┘
+                │
+                ↓
+┌─────────────────────────────────────────┐
+│        Google Sheets API                │
+│   (Source of truth for all data)        │
+└─────────────────────────────────────────┘
 ```
 
-#### 2. Create Web Service on Render
-1. Go to [Render Dashboard](https://dashboard.render.com/)
-2. Click **"New +"** → **"Web Service"**
-3. Connect your GitHub repository
-4. Configure the service:
+### Key Principles
 
-**Basic Settings:**
-- **Name**: `expense-tracker` (or your choice)
-- **Region**: Choose closest to your users
-- **Branch**: `main`
-- **Root Directory**: Leave empty
-- **Runtime**: `Python 3`
+1. **Google Sheets = Source of Truth**
+   - All data is stored in Google Sheets
+   - One "Categories" sheet per user
+   - One "Expenses" sheet per user
 
-**Build & Deploy:**
-- **Build Command**: 
-  ```
-  pip install -r requirements.txt
-  ```
-- **Start Command**: 
-  ```
-  uvicorn backend.main:app --host 0.0.0.0 --port $PORT
-  ```
+2. **SQLite = Temporary Cache**
+   - Fast queries for charts and listings
+   - Rebuilt from Google Sheets on every app startup
+   - Not persistent across Render redeploys
 
-#### 3. Add Persistent Disk
-**IMPORTANT**: SQLite needs persistent storage!
+3. **User Isolation**
+   - Each user has their own Google Sheets
+   - All operations scoped by `user_id`
+   - No data leakage between users
 
-1. In your Web Service dashboard, go to **"Disks"** tab
-2. Click **"Add Disk"**
-3. Configure:
-   - **Name**: `expense-data`
-   - **Mount Path**: `/data`
-   - **Size**: 1 GB (or more if needed)
-4. Click **"Save"**
+4. **Startup Behavior**
+   - App reads all users' sheets
+   - Hydrates SQLite database
+   - App becomes ready for requests
 
-#### 4. Set Environment Variables
-Go to **"Environment"** tab and add:
+5. **Normal Operations**
+   - Write to both SQLite (for speed) and Google Sheets (for persistence)
+   - Reads come from SQLite
+   - Charts generated from SQLite
 
-| Key | Value |
-|-----|-------|
-| `DATABASE_URL` | `sqlite:////data/expenses.db` |
-| `PORT` | (Auto-set by Render, no need to add) |
+6. **Client-Side Session**
+   - User credentials stored in localStorage
+   - Users remain logged in across redeploys
+   - Logout clears localStorage and IndexedDB
 
-**Note**: Use **4 forward slashes** (`////`) for absolute path!
+---
 
-#### 5. Deploy
-1. Click **"Create Web Service"**
-2. Wait for build & deploy (2-3 minutes)
-3. Once deployed, click the service URL (e.g., `https://expense-tracker.onrender.com`)
-
-#### 6. Seed Production Database
-```bash
-curl -X POST https://your-app.onrender.com/api/seed
-```
-
-Or open the URL in browser and access: `/api/seed`
-
-#### 7. Test PWA Installation
-1. Open the deployed URL on mobile
-2. Browser will prompt "Add to Home Screen"
-3. Install and test offline functionality!
-
-### Important Render Notes
-
-- **Free Tier**: Spins down after 15 min of inactivity. First request may be slow.
-- **Persistent Disk**: Required for SQLite. Data persists across deploys.
-- **Database Path**: Must use `/data/expenses.db` with 4 slashes in DATABASE_URL
-- **Health Checks**: Render auto-checks `/api/health` endpoint
-- **Logs**: View real-time logs in Render dashboard
-
-### Upgrading Render Plan (Optional)
-For production use:
-- Upgrade to paid plan ($7/mo) for always-on service
-- Increase disk size if needed
-- Add custom domain
-- Enable auto-deploy on git push
-
-## 🏗️ Project Structure
+## 🗂️ Project Structure
 
 ```
 expense_tracker/
 ├── backend/
 │   ├── __init__.py
-│   ├── main.py          # FastAPI app, routes, static file serving
-│   ├── models.py        # SQLModel database models
-│   ├── database.py      # Database connection & session
-│   └── seed.py          # Seed script with taxonomy
+│   ├── main.py                     # FastAPI app + all endpoints
+│   ├── models.py                   # SQLModel definitions (User, Category, Expense)
+│   ├── database.py                 # Database session management
+│   ├── auth.py                     # Google OAuth verification
+│   ├── google_sheets_service.py    # Google Sheets API wrapper
+│   ├── user_mapping.py             # User → Sheet ID mapping
+│   └── hydration.py                # Rebuild DB from Sheets on startup
 ├── frontend/
-│   ├── index.html       # Single-page app HTML
-│   ├── styles.css       # Responsive mobile-first CSS
-│   ├── app.js           # Main JavaScript (IndexedDB, API, UI)
-│   ├── manifest.json    # PWA manifest
-│   └── service-worker.js # Service worker for offline support
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Docker configuration
-├── Procfile            # Render/Heroku start command
-├── .gitignore          # Git ignore file
-├── LICENSE             # MIT License
-├── run_local.sh        # Local setup & run script
-└── README.md           # This file
+│   ├── index.html                  # Main app (protected)
+│   ├── login.html                  # Google login (landing page)
+│   ├── app.js                      # Frontend logic (auth + API calls)
+│   ├── styles.css                  # Responsive styles
+│   ├── manifest.json               # PWA manifest
+│   └── service-worker.js           # Offline support
+├── requirements.txt                # Python dependencies
+├── Dockerfile                      # Docker build (optional)
+├── Procfile                        # Render start command
+├── run_local.sh                    # Local dev script
+├── .env.example                    # Example environment variables
+├── .gitignore                      # Ignore sensitive files
+└── README.md                       # This file
 ```
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:///./expenses.db` | Database connection string |
-| `PORT` | `8000` | Server port (auto-set by Render) |
-
-### Database URLs
-
-**Local Development:**
-```
-sqlite:///./expenses.db        # Relative path in project root
-```
-
-**Docker:**
-```
-sqlite:///./expenses.db        # Inside container
-```
-
-**Render Production:**
-```
-sqlite:////data/expenses.db    # Absolute path to mounted disk
-```
-
-## 📊 API Documentation
-
-Once running, visit:
-- **Interactive Docs**: http://localhost:8000/docs
-- **Alternative Docs**: http://localhost:8000/redoc
-
-### Key Endpoints
-
-#### Categories
-- `GET /api/categories` - List all C1 categories
-- `POST /api/categories` - Create C1 category
-- `PUT /api/categories/{id}` - Update C1 category
-- `GET /api/categories/{c1_id}/c2` - List C2 for C1
-- `POST /api/categories/{c1_id}/c2` - Create C2 under C1
-- `PUT /api/categories/c2/{id}` - Update C2 category
-
-#### Expenses
-- `GET /api/expenses` - List expenses (supports filters: start_date, end_date, limit, offset)
-- `POST /api/expenses` - Create expense
-- `GET /api/expenses/{id}` - Get single expense
-- `PUT /api/expenses/{id}` - Update expense
-- `DELETE /api/expenses/{id}` - Delete expense (soft delete)
-- `GET /api/expenses/top?limit=10` - Top N expenses
-
-#### Insights
-- `GET /api/insights/monthly` - Monthly totals (last 12 months)
-- `GET /api/insights/c1-distribution` - Total per C1 category
-- `GET /api/insights/c2-breakdown?c1_id=X` - Total per C2 (optional C1 filter)
-
-#### Utility
-- `POST /api/seed` - Seed database with taxonomy
-- `GET /api/health` - Health check
-
-## 🧪 Testing
-
-### Test Offline Functionality
-
-1. **Setup:**
-   ```bash
-   ./run_local.sh
-   # Open http://localhost:8000
-   ```
-
-2. **Go Offline:**
-   - Chrome DevTools → Network → Check "Offline"
-   - Add an expense
-   - Should see "📥 Saved offline. Will sync when online."
-
-3. **Check Queue:**
-   - Navigate to Settings screen
-   - Should show "X expense(s) waiting to sync"
-
-4. **Go Online:**
-   - Uncheck "Offline" in DevTools
-   - Click "Sync Now" button
-   - Should see "✅ Synced X expense(s)!"
-
-5. **Verify:**
-   - Navigate to Expenses list
-   - Offline expense should appear
-
-### Test PWA Installation
-
-**Desktop (Chrome):**
-1. Open app → Look for install icon in address bar
-2. Click → Install
-3. App opens in standalone window
-
-**Mobile (iOS Safari):**
-1. Open app → Tap Share button
-2. Tap "Add to Home Screen"
-3. App appears on home screen
-
-**Mobile (Android Chrome):**
-1. Open app → Tap "Add to Home Screen" prompt
-2. Or Menu → "Install app"
-3. App appears in app drawer
-
-## 🐛 Troubleshooting
-
-### Issue: CORS Errors
-**Symptom**: API calls fail with CORS errors in browser console.
-
-**Solution**: 
-- Check backend CORS settings in `backend/main.py`
-- For production, restrict `allow_origins` to your domain
-- Currently set to `["*"]` for development
-
-### Issue: Database Not Found
-**Symptom**: `no such table` errors.
-
-**Solution**:
-```bash
-# Delete old database
-rm expenses.db
-
-# Restart server (tables auto-create)
-./run_local.sh
-
-# Seed database
-curl -X POST http://localhost:8000/api/seed
-```
-
-### Issue: Render Deploy Fails
-**Symptom**: Build or start command fails on Render.
-
-**Common Fixes**:
-1. Check Python version (must be 3.10+)
-2. Verify `requirements.txt` is in root
-3. Check start command: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-4. View logs in Render dashboard
-
-### Issue: Data Not Persisting on Render
-**Symptom**: Data disappears after redeploy.
-
-**Solution**:
-1. Ensure persistent disk is attached
-2. Mount path is `/data`
-3. `DATABASE_URL=sqlite:////data/expenses.db` (4 slashes!)
-4. Disk survives across deploys
-
-### Issue: PWA Not Installing
-**Symptom**: No "Add to Home Screen" option.
-
-**Checks**:
-1. Must be served over HTTPS (Render provides this)
-2. Manifest.json must be valid
-3. Service worker must register successfully
-4. Check browser console for errors
-5. Some browsers require user interaction first
-
-### Issue: Offline Sync Not Working
-**Symptom**: Queued expenses don't sync.
-
-**Debug Steps**:
-1. Open DevTools → Application → IndexedDB → ExpenseTrackerDB
-2. Check `queuedExpenses` store for items
-3. Open DevTools → Application → Service Workers
-4. Verify service worker is active
-5. Check Network tab for failed requests
-6. Use "Sync Now" button in Settings for manual trigger
-
-### Issue: Charts Not Displaying
-**Symptom**: Blank chart areas.
-
-**Solution**:
-1. Check browser console for JavaScript errors
-2. Verify Chart.js CDN is loading (check Network tab)
-3. Ensure API endpoints return data
-4. Try refreshing the page
-
-## 📱 Browser Support
-
-| Browser | Version | PWA Install | Offline Sync |
-|---------|---------|-------------|--------------|
-| Chrome | 80+ | ✅ | ✅ |
-| Edge | 80+ | ✅ | ✅ |
-| Firefox | 90+ | ✅ | ⚠️ Partial |
-| Safari (iOS) | 14+ | ✅ | ⚠️ Fallback |
-| Safari (macOS) | 14+ | ✅ | ⚠️ Fallback |
-
-**Note**: Background Sync API has limited support. Fallback periodic sync implemented for all browsers.
-
-## 🔐 Security Considerations
-
-For production use:
-1. **CORS**: Restrict `allow_origins` to your domain
-2. **HTTPS**: Always use HTTPS (Render provides free SSL)
-3. **Input Validation**: All inputs validated on backend
-4. **SQL Injection**: Protected by SQLModel/SQLAlchemy
-5. **Authentication**: Not implemented (add if needed for multi-user)
-
-## 🚀 Performance
-
-- **First Load**: ~500ms (cached after first visit)
-- **Offline Load**: <100ms (service worker cache)
-- **Add Expense**: <10 seconds user time
-- **API Response**: <50ms (local SQLite)
-- **Chart Load**: ~200ms (client-side rendering)
-
-## 📈 Future Enhancements
-
-Potential improvements:
-- [ ] Multi-user support with authentication
-- [ ] Recurring expenses
-- [ ] Budget tracking & alerts
-- [ ] Export to CSV/PDF
-- [ ] Receipt photo upload
-- [ ] Currency conversion
-- [ ] Split expenses between people
-- [ ] Push notifications
-- [ ] Dark mode
-- [ ] Advanced filters & search
-
-## 🤝 Contributing
-
-This is a complete, runnable reference implementation. To modify:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test locally with `./run_local.sh`
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - See [LICENSE](LICENSE) file for details.
-
-## 💡 Tips & Best Practices
-
-### Development
-- Use `--reload` flag for auto-restart on code changes
-- Check browser console for JavaScript errors
-- Use DevTools → Application tab to inspect IndexedDB and Service Worker
-- Test offline mode frequently during development
-
-### Production
-- Monitor Render logs for errors
-- Set up uptime monitoring (e.g., UptimeRobot)
-- Regular database backups (download from Render disk)
-- Consider upgrading to paid plan for better performance
-
-### Data Management
-- **Backup**: Download `/data/expenses.db` from Render disk
-- **Restore**: Upload db file to `/data` mount point
-- **Migration**: If changing schema, create migration script
-- **Export**: Use API endpoints to export data as JSON
-
-## 📞 Support
-
-For issues or questions:
-1. Check this README first
-2. Check browser console for errors
-3. Review Render logs
-4. Test locally to isolate issue
-5. Check API docs at `/docs` endpoint
-
-## 🎉 Quick Start Checklist
-
-- [ ] Clone repository
-- [ ] Run `chmod +x run_local.sh`
-- [ ] Run `./run_local.sh`
-- [ ] Open http://localhost:8000
-- [ ] Seed database: `curl -X POST http://localhost:8000/api/seed`
-- [ ] Add a test expense
-- [ ] Test offline mode
-- [ ] Deploy to Render
-- [ ] Set up persistent disk
-- [ ] Set DATABASE_URL env var
-- [ ] Seed production database
-- [ ] Test PWA install on mobile
 
 ---
 
-**Built with ❤️ for offline-first expense tracking**
+## 🧪 Testing
 
-*Version 1.0.0 - January 2026*
+### Test Locally
 
-# personal-expense-tracker
+```bash
+# Start the server
+./run_local.sh
+
+# In another terminal, test the health endpoint
+curl http://localhost:8000/api/health
+
+# Expected response:
+# {"status": "healthy", "timestamp": "...", "google_sheets": true}
+```
+
+### Test Google Login
+
+1. Visit `http://localhost:8000`
+2. Click "Sign in with Google"
+3. Sign in with a test user
+4. Check the app loads
+
+### Test Offline Mode
+
+1. Add an expense while online
+2. Open DevTools → Network tab
+3. Set to "Offline" mode
+4. Add another expense
+5. Check it's queued in IndexedDB
+6. Go back online
+7. Refresh the page
+8. The queued expense should sync automatically
+
+---
+
+## 🔐 Security Notes
+
+- ⚠️ **Never commit** your `.env` file or service account JSON to Git
+- ⚠️ Service account JSON grants full access - keep it secret
+- ✅ OAuth tokens are verified server-side
+- ✅ All API calls require valid `user_id`
+- ✅ Users can only access their own data
+- ✅ Google Sheets are private to each user's service account
+
+---
+
+## 📊 Default Category Taxonomy
+
+The app seeds these categories for new users:
+
+1. **Food**: Eat Outside, Groceries, Office Food, Snacks, Beverages
+2. **Transport**: Scooty Petrol, Maintenance, Parking, Cab/Auto, Public Transport
+3. **Health & Fitness**: Gym Membership, Trainer, Protein Powder, Supplements, Skincare, Doctor/Medical
+4. **Education & Career**: Courses, ChatGPT/AI Tools, Books, Certifications, Workshops
+5. **Home & Living**: Cooking Supplies, Utilities, Rent, Maintenance, Household Items
+6. **Family & Relationships**: Parents Support, Medical for Family, Gifts, Festivals, Occasions
+7. **Lifestyle**: Shopping, Entertainment, Cafes, Hobbies, Self-care
+8. **Subscriptions & Tools**: Streaming, Cloud Services, Software, Productivity Apps
+9. **Travel**: Transport, Stay, Food (Travel), Local Travel, Activities
+10. **Miscellaneous**: One-off Expenses, Unplanned, Unknown
+
+---
+
+## 🐛 Troubleshooting
+
+### Issue: "Invalid token" error on login
+
+- **Cause**: OAuth Client ID mismatch or expired token
+- **Fix**: 
+  - Verify `GOOGLE_CLIENT_ID` matches the one in Google Cloud Console
+  - Check authorized origins include your domain
+  - Try clearing browser cookies/cache
+
+### Issue: "Google Sheets not available"
+
+- **Cause**: Service account credentials invalid or APIs not enabled
+- **Fix**:
+  - Verify `GOOGLE_APPLICATION_CREDENTIALS` path is correct
+  - Check both Google Sheets API and Google Drive API are enabled
+  - Verify service account JSON is valid
+
+### Issue: "No categories available"
+
+- **Cause**: New user, categories not seeded yet
+- **Fix**:
+  - Refresh the page (should auto-hydrate)
+  - Check backend logs for errors
+  - Manually check Google Sheets for your user
+
+### Issue: App is slow on Render
+
+- **Cause**: Free tier has limited resources
+- **Fix**:
+  - Upgrade to a paid plan
+  - Or accept slower cold starts (free tier spins down after 15min of inactivity)
+
+### Issue: Data lost after redeploy
+
+- **Cause**: SQLite is in `/tmp` or not using Google Sheets
+- **Fix**:
+  - Verify `DATABASE_URL` is set correctly
+  - Check backend logs confirm Google Sheets hydration runs
+  - Manually verify data exists in Google Sheets
+
+---
+
+## 🤝 Contributing
+
+This is a personal expense tracker, but feel free to fork and customize!
+
+---
+
+## 📄 License
+
+MIT License - see `LICENSE` file for details.
+
+---
+
+## 🎉 Enjoy Tracking Your Expenses!
+
+Built with ❤️ using FastAPI, Google Sheets API, and Vanilla JS.
+
+For issues or questions, check the backend logs or inspect the browser console for errors.
