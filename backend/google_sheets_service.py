@@ -195,7 +195,7 @@ class GoogleSheetsService:
             expenses_title = f"{user_id} - Expenses"
             expenses_sheet = self.sa_client.create(expenses_title)
             expenses_worksheet = expenses_sheet.get_worksheet(0)
-            expenses_worksheet.update('A1:I1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want', 'created_at']])
+            expenses_worksheet.update('A1:J1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want', 'created_at', 'deleted']])
             
             logger.info(f"Created Expenses sheet: {expenses_sheet.id}")
             
@@ -282,7 +282,7 @@ class GoogleSheetsService:
         """Initialize expenses sheet with headers"""
         try:
             sheet = self.sa_client.open_by_key(sheet_id).get_worksheet(0)
-            sheet.update('A1:I1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want', 'created_at']])
+            sheet.update('A1:J1', [['date', 'amount', 'c1_name', 'c2_name', 'payment_mode', 'notes', 'person', 'need_vs_want', 'created_at', 'deleted']])
             logger.info(f"Initialized expenses sheet headers: {sheet_id}")
         except Exception as e:
             logger.error(f"Error initializing expenses sheet: {e}")
@@ -364,7 +364,7 @@ class GoogleSheetsService:
             raise
 
     def append_expense(self, sheet_id: str, expense_data: Dict):
-        """Append expense to Google Sheets (matches 9-column header)"""
+        """Append expense to Google Sheets (matches 10-column header)"""
         sheet = self.sa_client.open_by_key(sheet_id).sheet1
         sheet.append_row([
             expense_data.get("date"),
@@ -375,14 +375,54 @@ class GoogleSheetsService:
             expense_data.get("notes"),
             expense_data.get("person"),
             expense_data.get("need_vs_want"),
-            expense_data.get("created_at")  # Timestamp for tracking
+            expense_data.get("created_at"),
+            "false"  # deleted - always false for new expenses
         ])
 
-    def update_category_status(self, sheet_id: str, c2_name: str, is_active: bool):
-        sheet = self.sa_client.open_by_key(sheet_id).sheet1
-        cell = sheet.find(c2_name)
-        if cell:
-            sheet.update_cell(cell.row, 3, "true" if is_active else "false")
+    def update_category_status(self, sheet_id: str, c1_name: str, c2_name: str, is_active: bool):
+        """Update the is_active status of a category in Google Sheets"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            # Find the row with matching c1_name and c2_name
+            all_values = sheet.get_all_values()
+            
+            for i, row in enumerate(all_values):
+                if len(row) >= 3 and row[0] == c1_name and row[1] == c2_name:
+                    # Update column C (is_active) - row is 1-indexed
+                    sheet.update_cell(i + 1, 3, "true" if is_active else "false")
+                    logger.info(f"Updated category {c1_name}/{c2_name} active status to {is_active}")
+                    return
+            
+            logger.warning(f"Category {c1_name}/{c2_name} not found in sheet")
+        except Exception as e:
+            logger.error(f"Error updating category status: {e}")
+
+    def mark_expense_deleted(self, sheet_id: str, expense_date: str, amount: float, c2_name: str):
+        """Mark an expense as deleted in Google Sheets (finds by date+amount+c2)"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            all_values = sheet.get_all_values()
+            
+            # Skip header row, find matching expense
+            for i, row in enumerate(all_values[1:], start=2):  # Start from row 2 (1-indexed)
+                if len(row) >= 10:
+                    # Match by date, amount, and c2_name
+                    row_date = row[0]
+                    row_amount = row[1]
+                    row_c2 = row[3]
+                    
+                    # Convert amount to string for comparison
+                    if row_date == expense_date and str(row_amount) == str(amount) and row_c2 == c2_name:
+                        # Update column J (deleted) to "true"
+                        sheet.update_cell(i, 10, "true")
+                        logger.info(f"Marked expense as deleted in Sheets: {expense_date}, {amount}, {c2_name}")
+                        return True
+            
+            logger.warning(f"Expense not found in sheet: {expense_date}, {amount}, {c2_name}")
+            return False
+        except Exception as e:
+            logger.error(f"Error marking expense as deleted: {e}")
+            return False
 
 
 # ==========================================================

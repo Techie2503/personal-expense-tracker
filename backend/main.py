@@ -503,12 +503,29 @@ def delete_expense(
     if not db_expense or db_expense.user_id != user_id or db_expense.deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
     
+    # Mark as deleted in DB
     db_expense.deleted = True
     db_expense.updated_at = datetime.utcnow()
     session.add(db_expense)
     session.commit()
     
     logger.info(f"Deleted expense ID: {expense_id} for user {user_id}")
+    
+    # Sync to Google Sheets
+    try:
+        user = session.get(User, user_id)
+        if user and user.expenses_sheet_id != "local":
+            # Mark as deleted in Sheets (find by date+amount+c2)
+            google_sheets_service.mark_expense_deleted(
+                user.expenses_sheet_id,
+                db_expense.date.strftime("%Y-%m-%dT%H:%M") if db_expense.date else "",
+                db_expense.amount,
+                db_expense.c2_name
+            )
+            logger.info(f"Synced expense deletion to Google Sheets")
+    except Exception as e:
+        logger.error(f"Error syncing expense deletion to sheets: {e}")
+    
     return {"message": "Expense deleted successfully", "id": expense_id}
 
 
