@@ -420,8 +420,9 @@ class GoogleSheetsService:
                                    row_date.startswith(expense_date.split('T')[0]))  # Match date part only
                     amount_matches = str(row_amount) == str(amount) or float(row_amount) == float(amount)
                     c2_matches = row_c2 == c2_name
+                    c1_matches = row_c1 == c1_name
                     
-                    if date_matches and amount_matches and c2_matches:
+                    if date_matches and amount_matches and c2_matches and c1_matches:
                         # Update column J (deleted) to "true"
                         sheet.update_cell(i, 10, "true")
                         logger.info(f"✅ Marked expense as deleted in Sheets at row {i}")
