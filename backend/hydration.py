@@ -61,7 +61,9 @@ def hydrate_user_data(session: Session, user_id: str):
         for row in categories_data:
             c1_name = row.get('c1_name', '')
             c2_name = row.get('c2_name', '')
-            is_active = row.get('is_active', 'true').lower() == 'true'
+            # Parse is_active (handle string TRUE/FALSE from Sheets)
+            is_active_str = str(row.get('is_active', 'TRUE')).upper()
+            is_active = is_active_str == 'TRUE'
             
             if not c1_name or not c2_name:
                 continue

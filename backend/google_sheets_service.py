@@ -394,54 +394,57 @@ class GoogleSheetsService:
     def update_category_status(self, sheet_id: str, c1_name: str, c2_name: str, is_active: bool):
         """Update the is_active status of a category in Google Sheets"""
         try:
+            logger.info(f"Updating category status in Sheets: {c1_name}/{c2_name} → is_active={is_active}")
             sheet = self.sa_client.open_by_key(sheet_id).sheet1
             # Find the row with matching c1_name and c2_name
             all_values = sheet.get_all_values()
             
+            logger.debug(f"Searching through {len(all_values)} rows")
+            
             for i, row in enumerate(all_values):
                 if len(row) >= 3 and row[0] == c1_name and row[1] == c2_name:
                     # Update column C (is_active) - row is 1-indexed
-                    sheet.update_cell(i + 1, 3, "TRUE" if is_active else "FALSE")
-                    logger.info(f"Updated category {c1_name}/{c2_name} active status to {is_active}")
+                    new_value = "TRUE" if is_active else "FALSE"
+                    sheet.update_cell(i + 1, 3, new_value)
+                    logger.info(f"✅ Updated category {c1_name}/{c2_name} is_active to {new_value} at row {i+1}")
                     return
             
-            logger.warning(f"Category {c1_name}/{c2_name} not found in sheet")
+            logger.warning(f"❌ Category {c1_name}/{c2_name} not found in sheet {sheet_id}")
         except Exception as e:
             logger.error(f"Error updating category status: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
-    def mark_expense_deleted(self, sheet_id: str, expense_date: str, amount: float, c2_name: str):
-        """Mark an expense as deleted in Google Sheets (finds by date+amount+c2)"""
+    def mark_expense_deleted(self, sheet_id: str, expense_date: str, amount: float, c2_name: str, created_at: str):
+        """Mark an expense as deleted in Google Sheets (finds by date+amount+c2+created_at for uniqueness)"""
         try:
+            logger.info(f"Marking expense as deleted: date={expense_date}, amount={amount}, c2={c2_name}, created_at={created_at}")
             sheet = self.sa_client.open_by_key(sheet_id).sheet1
             all_values = sheet.get_all_values()
-            
-            logger.info(f"Searching for expense to delete: date={expense_date}, amount={amount}, c2={c2_name}")
             
             # Skip header row, find matching expense
             for i, row in enumerate(all_values[1:], start=2):  # Start from row 2 (1-indexed)
                 if len(row) >= 10:
-                    # Match by date, amount, and c2_name
                     row_date = row[0]
                     row_amount = row[1]
                     row_c2 = row[3]
+                    row_created_at = row[8]
                     
-                    logger.debug(f"Checking row {i}: date={row_date}, amount={row_amount}, c2={row_c2}")
-                    
-                    # More flexible date matching (try both formats)
-                    # Extract date parts for comparison (YYYY-MM-DD)
+                    # Match by date, amount, c2_name, and created_at (unique combo)
                     row_date_part = row_date.split('T')[0] if 'T' in row_date else row_date
                     expense_date_part = expense_date.split('T')[0] if 'T' in expense_date else expense_date
                     date_matches = row_date_part == expense_date_part
-                    amount_matches = str(row_amount) == str(amount) or float(row_amount) == float(amount)
+                    amount_matches = str(row_amount) == str(amount) or abs(float(row_amount) - float(amount)) < 0.01
                     c2_matches = row_c2 == c2_name
+                    created_matches = row_created_at.startswith(created_at.split('.')[0])  # Match without microseconds
                     
-                    if date_matches and amount_matches and c2_matches:
+                    if date_matches and amount_matches and c2_matches and created_matches:
                         # Update column J (deleted) to "TRUE"
                         sheet.update_cell(i, 10, "TRUE")
-                        logger.info(f"✅ Marked expense as deleted in Sheets at row {i}")
+                        logger.info(f"✅ Marked expense as deleted at row {i}")
                         return True
             
-            logger.warning(f"❌ Expense not found in sheet: {expense_date}, {amount}, {c2_name}")
+            logger.warning(f"❌ Expense not found in sheet")
             return False
         except Exception as e:
             logger.error(f"Error marking expense as deleted: {e}")
