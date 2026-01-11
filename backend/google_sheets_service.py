@@ -120,11 +120,11 @@ class GoogleSheetsService:
             sheet_ids = self._get_user_sheet_ids(user_id, oauth_access_token)
             
             if sheet_ids:
-                logger.info(f"Found existing sheets for user {user_id}")
+                logger.info(f"✅ Found existing sheets for user {user_id}: {sheet_ids}")
                 return sheet_ids
             
             # Create new sheets for new user
-            logger.info(f"Creating new sheets for user {user_id}")
+            logger.info(f"❌ No existing sheets found, creating new sheets for user {user_id}")
             if oauth_access_token:
                 return self._create_user_sheets_oauth(user_id, user_email, oauth_access_token)
             else:
@@ -142,11 +142,14 @@ class GoogleSheetsService:
             categories_title = f"{user_id} - Categories"
             expenses_title = f"{user_id} - Expenses"
             
+            logger.info(f"Searching for sheets: '{categories_title}' and '{expenses_title}'")
+            
             categories_sheet = None
             expenses_sheet = None
             
             if oauth_access_token:
                 # Search in user's Drive
+                logger.info("Using OAuth token to search user's Drive")
                 oauth_creds = OAuthCredentials(token=oauth_access_token)
                 drive = build("drive", "v3", credentials=oauth_creds)
                 
@@ -154,13 +157,17 @@ class GoogleSheetsService:
                 query = f"(name='{categories_title}' or name='{expenses_title}') and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
                 results = drive.files().list(q=query, fields="files(id, name)").execute()
                 
+                logger.info(f"Found {len(results.get('files', []))} matching files in Drive")
+                
                 for file in results.get('files', []):
+                    logger.info(f"  - {file['name']}: {file['id']}")
                     if file['name'] == categories_title:
                         categories_sheet = file['id']
                     elif file['name'] == expenses_title:
                         expenses_sheet = file['id']
             else:
                 # Search in service account's Drive (fallback)
+                logger.info("Using Service Account to search")
                 for sheet in self.sa_client.openall():
                     if sheet.title == categories_title:
                         categories_sheet = sheet.id
@@ -171,12 +178,17 @@ class GoogleSheetsService:
                         break
             
             if categories_sheet and expenses_sheet:
+                logger.info(f"Both sheets found!")
                 return {
                     "categories_sheet_id": categories_sheet,
                     "expenses_sheet_id": expenses_sheet
                 }
+            else:
+                logger.info(f"Missing sheets: categories={bool(categories_sheet)}, expenses={bool(expenses_sheet)}")
         except Exception as e:
             logger.error(f"Error finding user sheets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return None
     
@@ -416,8 +428,10 @@ class GoogleSheetsService:
                     logger.debug(f"Checking row {i}: date={row_date}, amount={row_amount}, c2={row_c2}")
                     
                     # More flexible date matching (try both formats)
-                    date_matches = (row_date == expense_date or 
-                                   row_date.startswith(expense_date.split('T')[0]))  # Match date part only
+                    # Extract date parts for comparison (YYYY-MM-DD)
+                    row_date_part = row_date.split('T')[0] if 'T' in row_date else row_date
+                    expense_date_part = expense_date.split('T')[0] if 'T' in expense_date else expense_date
+                    date_matches = row_date_part == expense_date_part
                     amount_matches = str(row_amount) == str(amount) or float(row_amount) == float(amount)
                     c2_matches = row_c2 == c2_name
                     c1_matches = row_c1 == c1_name
