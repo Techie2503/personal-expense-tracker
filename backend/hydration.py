@@ -132,6 +132,10 @@ def hydrate_user_data(session: Session, user_id: str):
                 except:
                     expense_date = datetime.utcnow()
                 
+                # Parse deleted status (handle string TRUE/FALSE from Sheets)
+                deleted_str = str(row.get('deleted', 'FALSE')).upper()
+                is_deleted = deleted_str == 'TRUE'
+                
                 expense = Expense(
                     user_id=user_id,
                     date=expense_date,
@@ -144,7 +148,7 @@ def hydrate_user_data(session: Session, user_id: str):
                     notes=row.get('notes'),
                     person=row.get('person'),
                     need_vs_want=row.get('need_vs_want'),
-                    deleted=False
+                    deleted=is_deleted
                 )
                 session.add(expense)
                 
