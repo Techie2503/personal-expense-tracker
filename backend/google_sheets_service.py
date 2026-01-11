@@ -315,7 +315,7 @@ class GoogleSheetsService:
             rows = []
             for c1_name, c2_list in DEFAULT_CATEGORIES.items():
                 for c2_name in c2_list:
-                    rows.append([c1_name, c2_name, 'true'])
+                    rows.append([c1_name, c2_name, 'TRUE'])
             
             if rows:
                 # Append starting from row 2 (after headers)
@@ -368,7 +368,7 @@ class GoogleSheetsService:
             sheet.append_row([
                 category_data.get("c1_name"),
                 category_data.get("c2_name"),
-                category_data.get("is_active", "true")
+                category_data.get("is_active", "TRUE")
             ])
             logger.info(f"Appended category to sheet {sheet_id}")
         except Exception as e:
@@ -388,7 +388,7 @@ class GoogleSheetsService:
             expense_data.get("person"),
             expense_data.get("need_vs_want"),
             expense_data.get("created_at"),
-            "false"  # deleted - always false for new expenses
+            "FALSE"  # deleted - always FALSE for new expenses
         ])
 
     def update_category_status(self, sheet_id: str, c1_name: str, c2_name: str, is_active: bool):
@@ -401,7 +401,7 @@ class GoogleSheetsService:
             for i, row in enumerate(all_values):
                 if len(row) >= 3 and row[0] == c1_name and row[1] == c2_name:
                     # Update column C (is_active) - row is 1-indexed
-                    sheet.update_cell(i + 1, 3, "true" if is_active else "false")
+                    sheet.update_cell(i + 1, 3, "TRUE" if is_active else "FALSE")
                     logger.info(f"Updated category {c1_name}/{c2_name} active status to {is_active}")
                     return
             
@@ -436,8 +436,8 @@ class GoogleSheetsService:
                     c2_matches = row_c2 == c2_name
                     
                     if date_matches and amount_matches and c2_matches:
-                        # Update column J (deleted) to "true"
-                        sheet.update_cell(i, 10, "true")
+                        # Update column J (deleted) to "TRUE"
+                        sheet.update_cell(i, 10, "TRUE")
                         logger.info(f"✅ Marked expense as deleted in Sheets at row {i}")
                         return True
             
