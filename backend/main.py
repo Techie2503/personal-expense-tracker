@@ -294,6 +294,17 @@ def create_c2_category(
     if not c1 or c1.user_id != user_id:
         raise HTTPException(status_code=404, detail="C1 category not found")
     
+    # Check for duplicate C2 under this C1
+    existing = session.exec(
+        select(Category2).where(
+            Category2.user_id == user_id,
+            Category2.c1_id == c1_id,
+            Category2.name == category.name
+        )
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Category '{category.name}' already exists under '{c1.name}'")
+    
     db_category = Category2(
         user_id=user_id,
         name=category.name,
@@ -520,7 +531,8 @@ def delete_expense(
                 user.expenses_sheet_id,
                 db_expense.date.strftime("%Y-%m-%dT%H:%M") if db_expense.date else "",
                 db_expense.amount,
-                db_expense.c2_name
+                db_expense.c2_name,
+                db_expense.created_at.isoformat()
             )
             logger.info(f"Synced expense deletion to Google Sheets")
     except Exception as e:
