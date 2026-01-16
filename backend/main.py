@@ -196,6 +196,37 @@ def logout():
     return {"message": "Logged out successfully"}
 
 
+@app.post("/api/sync/hydrate")
+def sync_hydrate(
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """
+    Manually trigger hydration from Google Sheets for the current user
+    Useful after server restarts (e.g. Render free tier redeploys)
+    """
+    try:
+        # Verify user exists
+        user = session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        logger.info(f"Manual hydration requested for user: {user.email}")
+        
+        # Trigger hydration
+        hydrate_user_data(session, user_id)
+        
+        logger.info(f"Manual hydration completed for user: {user.email}")
+        
+        return {
+            "message": "Data refreshed successfully from Google Sheets",
+            "user_id": user_id
+        }
+    except Exception as e:
+        logger.error(f"Error during manual hydration for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Hydration failed: {str(e)}")
+
+
 # ============== HELPER: Get User from Request ==============
 
 def get_user_id_from_query(user_id: str = Query(...)) -> str:

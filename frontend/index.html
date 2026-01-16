@@ -214,6 +214,13 @@
                 <h2>Settings</h2>
                 
                 <div class="section">
+                    <h3>Refresh Data from Google Sheets</h3>
+                    <p>If the app was redeployed and your data is missing, click the button below to refresh from Google Sheets.</p>
+                    <button class="btn btn-primary" id="refreshDataBtn">🔄 Refresh Data</button>
+                    <div id="refreshResult" class="status-message" style="display: none; margin-top: 1rem;"></div>
+                </div>
+                
+                <div class="section">
                     <h3>Sync Status</h3>
                     <p id="queueStatus">Checking queue...</p>
                     <button class="btn btn-primary" id="syncNowBtn">Sync Now</button>
@@ -222,8 +229,8 @@
                 
                 <div class="section">
                     <h3>About</h3>
-                    <p>Expense Tracker PWA v1.0.0</p>
-                    <p>Offline-first expense tracking with automatic sync</p>
+                    <p>Expense Tracker PWA v2.0.0</p>
+                    <p>Multi-user expense tracking with Google Sheets backend</p>
                     <p>Built with FastAPI, IndexedDB, and Chart.js</p>
                 </div>
                 
