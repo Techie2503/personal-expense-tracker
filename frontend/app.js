@@ -17,6 +17,8 @@ let pageSize = 20;
 let isOnline = navigator.onLine;
 let c1Categories = [];
 let c2Categories = [];
+let incomeCategories = [];
+let currentInflowPage = 0;
 let charts = {};
 let deferredPrompt = null;
 let currentUser = null;  // Current logged-in user
@@ -390,6 +392,9 @@ async function loadScreenData(screenName) {
         case 'list':
             await loadExpenses();
             break;
+        case 'income':
+            await loadIncomeScreen();
+            break;
         case 'insights':
             await loadInsights();
             break;
@@ -732,6 +737,236 @@ async function downloadExpensesCSV() {
         console.error('Error downloading CSV:', error);
         const errorMsg = error.message || error.toString() || 'Unknown error occurred';
         alert('Error downloading CSV: ' + errorMsg);
+    }
+}
+
+// ==================== INCOME SCREEN ====================
+/**
+ * Load income categories for dropdown
+ */
+async function loadIncomeCategories() {
+    try {
+        incomeCategories = await apiFetch('/income/categories');
+        
+        const catSelect = document.getElementById('inflowCategory');
+        catSelect.innerHTML = '<option value="">Select category...</option>';
+        
+        incomeCategories
+            .filter(cat => cat.active)
+            .forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat.id;
+                option.textContent = cat.name;
+                catSelect.appendChild(option);
+            });
+    } catch (error) {
+        console.error('Error loading income categories:', error);
+        showStatus('inflowFormStatus', 'Error loading categories.', 'warning');
+    }
+}
+
+/**
+ * Load income screen (form + list)
+ */
+async function loadIncomeScreen() {
+    await loadIncomeCategories();
+    setDefaultInflowDateTime();
+    await loadInflows();
+}
+
+/**
+ * Set default date/time for inflow form
+ */
+function setDefaultInflowDateTime() {
+    const now = new Date();
+    const localDateTime = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+        .toISOString()
+        .slice(0, 16);
+    const dateInput = document.getElementById('inflowDate');
+    if (dateInput) {
+        dateInput.value = localDateTime;
+    }
+}
+
+/**
+ * Handle inflow form submission
+ */
+async function handleInflowSubmit(event) {
+    event.preventDefault();
+    
+    const dateInput = document.getElementById('inflowDate').value;
+    
+    const formData = {
+        date: dateInput,
+        amount: parseFloat(document.getElementById('inflowAmount').value),
+        category_id: parseInt(document.getElementById('inflowCategory').value),
+        notes: document.getElementById('inflowNotes').value || null
+    };
+    
+    try {
+        await apiPost('/inflows', formData);
+        showStatus('inflowFormStatus', '✅ Inflow saved successfully!', 'success');
+        
+        // Clear form
+        document.getElementById('inflowForm').reset();
+        setDefaultInflowDateTime();
+        
+        // Reload list
+        await loadInflows();
+        
+    } catch (error) {
+        console.error('Error saving inflow:', error);
+        showStatus('inflowFormStatus', '❌ Error: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Load and display inflows
+ */
+async function loadInflows() {
+    const listContainer = document.getElementById('inflowsList');
+    listContainer.innerHTML = '<div class="loading">Loading inflows...</div>';
+    
+    try {
+        const params = new URLSearchParams({
+            limit: pageSize,
+            offset: currentInflowPage * pageSize
+        });
+        
+        // Add date filters if set
+        const startDate = document.getElementById('filterInflowStartDate').value;
+        const endDate = document.getElementById('filterInflowEndDate').value;
+        
+        if (startDate) {
+            params.append('start_date', new Date(startDate).toISOString());
+        }
+        if (endDate) {
+            params.append('end_date', new Date(endDate).toISOString());
+        }
+        
+        const data = await apiFetch(`/inflows?${params}`);
+        
+        if (data.inflows.length === 0) {
+            listContainer.innerHTML = '<p class="loading">No inflows found.</p>';
+            return;
+        }
+        
+        listContainer.innerHTML = '';
+        data.inflows.forEach(inflow => {
+            const item = document.createElement('div');
+            item.className = 'expense-item';
+            
+            const date = new Date(inflow.date).toLocaleString();
+            
+            item.innerHTML = `
+                <div class="expense-header">
+                    <div class="expense-amount" style="color: #4CAF50;">+₹${inflow.amount.toFixed(2)}</div>
+                    <div class="expense-date">${date}</div>
+                </div>
+                <div class="expense-details">
+                    <span class="expense-category">${inflow.category_name}</span>
+                </div>
+                ${inflow.notes ? `<div class="expense-notes">${inflow.notes}</div>` : ''}
+                <div class="expense-actions">
+                    <button class="btn btn-sm btn-danger" onclick="deleteInflow(${inflow.id})">Delete</button>
+                </div>
+            `;
+            
+            listContainer.appendChild(item);
+        });
+        
+        // Update pagination
+        document.getElementById('inflowPageInfo').textContent = 
+            `Page ${currentInflowPage + 1} (${data.inflows.length} of ${data.total})`;
+        document.getElementById('prevInflowPageBtn').disabled = currentInflowPage === 0;
+        document.getElementById('nextInflowPageBtn').disabled = 
+            (currentInflowPage + 1) * pageSize >= data.total;
+        
+    } catch (error) {
+        console.error('Error loading inflows:', error);
+        listContainer.innerHTML = '<p class="loading">Error loading inflows. Check connection.</p>';
+    }
+}
+
+/**
+ * Delete inflow
+ */
+async function deleteInflow(id) {
+    if (!confirm('Delete this inflow?')) return;
+    
+    try {
+        await apiDelete(`/inflows/${id}`);
+        showStatus('inflowFormStatus', 'Inflow deleted', 'success');
+        await loadInflows();
+    } catch (error) {
+        alert('Error deleting inflow: ' + error.message);
+    }
+}
+
+/**
+ * Download inflows as CSV
+ */
+async function downloadInflowsCSV() {
+    try {
+        const params = new URLSearchParams({
+            limit: 10000,
+            offset: 0
+        });
+        
+        const startDate = document.getElementById('filterInflowStartDate').value;
+        const endDate = document.getElementById('filterInflowEndDate').value;
+        
+        if (startDate) {
+            params.append('start_date', new Date(startDate).toISOString());
+        }
+        if (endDate) {
+            params.append('end_date', new Date(endDate).toISOString());
+        }
+        
+        const data = await apiFetch(`/inflows?${params}`);
+        
+        if (!data.inflows || data.inflows.length === 0) {
+            alert('No inflows to download');
+            return;
+        }
+        
+        // Create CSV content
+        const headers = ['Date', 'Amount', 'Category', 'Notes'];
+        let csvContent = headers.join(',') + '\n';
+        
+        data.inflows.forEach(inflow => {
+            const date = new Date(inflow.date).toLocaleString();
+            const amount = inflow.amount.toFixed(2);
+            const category = inflow.category_name || '';
+            const notes = (inflow.notes || '').replace(/"/g, '""');
+            
+            const row = [
+                `"${date}"`,
+                amount,
+                `"${category}"`,
+                `"${notes}"`
+            ];
+            
+            csvContent += row.join(',') + '\n';
+        });
+        
+        // Create download link
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        
+        link.setAttribute('href', url);
+        link.setAttribute('download', `inflows_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        console.log(`Downloaded ${data.inflows.length} inflows as CSV`);
+    } catch (error) {
+        console.error('Error downloading CSV:', error);
+        alert('Error downloading CSV: ' + error.message);
     }
 }
 
@@ -1410,6 +1645,78 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Settings refresh data button
     document.getElementById('refreshDataBtn').addEventListener('click', handleRefreshData);
+    
+    // Income form
+    document.getElementById('inflowForm').addEventListener('submit', handleInflowSubmit);
+    document.getElementById('clearInflowFormBtn').addEventListener('click', () => {
+        document.getElementById('inflowForm').reset();
+        setDefaultInflowDateTime();
+    });
+    
+    // Add income category button
+    document.getElementById('addIncomeCatBtn').addEventListener('click', () => {
+        document.getElementById('addIncomeCatModal').classList.add('active');
+    });
+    
+    // Add income category modal close
+    document.getElementById('closeIncomeCatModal').addEventListener('click', () => {
+        document.getElementById('addIncomeCatModal').classList.remove('active');
+    });
+    
+    document.getElementById('cancelIncomeCatBtn').addEventListener('click', () => {
+        document.getElementById('addIncomeCatModal').classList.remove('active');
+    });
+    
+    // Add income category form submit
+    document.getElementById('addIncomeCatForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('newIncomeCatName').value.trim();
+        
+        if (!name) return;
+        
+        try {
+            const newCat = await apiPost('/income/categories', { name });
+            
+            // Reload categories and select the new one
+            await loadIncomeCategories();
+            document.getElementById('inflowCategory').value = newCat.id;
+            
+            // Close modal and clear form
+            document.getElementById('addIncomeCatModal').classList.remove('active');
+            document.getElementById('newIncomeCatName').value = '';
+        } catch (error) {
+            alert('Error adding category: ' + error.message);
+        }
+    });
+    
+    // Inflow list pagination
+    document.getElementById('prevInflowPageBtn').addEventListener('click', () => {
+        if (currentInflowPage > 0) {
+            currentInflowPage--;
+            loadInflows();
+        }
+    });
+    
+    document.getElementById('nextInflowPageBtn').addEventListener('click', () => {
+        currentInflowPage++;
+        loadInflows();
+    });
+    
+    // Download inflows CSV button
+    document.getElementById('downloadInflowsCsvBtn').addEventListener('click', downloadInflowsCSV);
+    
+    // Inflow list filters
+    document.getElementById('applyInflowFilterBtn').addEventListener('click', () => {
+        currentInflowPage = 0;
+        loadInflows();
+    });
+    
+    document.getElementById('clearInflowFilterBtn').addEventListener('click', () => {
+        document.getElementById('filterInflowStartDate').value = '';
+        document.getElementById('filterInflowEndDate').value = '';
+        currentInflowPage = 0;
+        loadInflows();
+    });
     
     // Initialize app
     initApp();

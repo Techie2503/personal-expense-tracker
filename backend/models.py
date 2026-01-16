@@ -19,6 +19,8 @@ class User(SQLModel, table=True):
     picture: Optional[str] = None
     categories_sheet_id: str
     expenses_sheet_id: str
+    income_categories_sheet_id: Optional[str] = None  # Income categories sheet
+    cashflows_sheet_id: Optional[str] = None  # Cashflows (inflows) sheet
     oauth_access_token: Optional[str] = None  # For creating sheets in user's Drive
     oauth_refresh_token: Optional[str] = None  # For refreshing access
     created_at: datetime = Field(
@@ -88,6 +90,43 @@ class Expense(SQLModel, table=True):
     )
 
 
+class IncomeCategory(SQLModel, table=True):
+    """Income category (C2 only - no C1 hierarchy)"""
+    __tablename__ = "income_categories"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(foreign_key="users.user_id", index=True)
+    name: str = Field(index=True)  # c2_name in sheets
+    active: bool = Field(default=True)
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column=Column(DateTime(timezone=True), server_default=func.now())
+    )
+
+
+class Inflow(SQLModel, table=True):
+    """Cash inflow (income) entry - per user"""
+    __tablename__ = "inflows"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: str = Field(foreign_key="users.user_id", index=True)
+    sheet_id: str = Field(index=True)  # UUID from Google Sheets
+    date: datetime = Field(index=True)
+    amount: float = Field(ge=0)
+    category_id: int = Field(foreign_key="income_categories.id", index=True)
+    category_name: str  # c2_name - denormalized for Sheets compatibility
+    notes: Optional[str] = Field(default=None)
+    deleted: bool = Field(default=False)
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column=Column(DateTime(timezone=True), server_default=func.now())
+    )
+    updated_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        sa_column=Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    )
+
+
 # Pydantic models for API requests/responses
 class UserResponse(SQLModel):
     user_id: str
@@ -140,4 +179,27 @@ class ExpenseUpdate(SQLModel):
     notes: Optional[str] = None
     person: Optional[str] = None
     need_vs_want: Optional[str] = None
+
+
+class IncomeCategoryCreate(SQLModel):
+    name: str
+
+
+class IncomeCategoryUpdate(SQLModel):
+    name: Optional[str] = None
+    active: Optional[bool] = None
+
+
+class InflowCreate(SQLModel):
+    date: datetime
+    amount: float = Field(ge=0)
+    category_id: int
+    notes: Optional[str] = None
+
+
+class InflowUpdate(SQLModel):
+    date: Optional[datetime] = None
+    amount: Optional[float] = Field(default=None, ge=0)
+    category_id: Optional[int] = None
+    notes: Optional[str] = None
 

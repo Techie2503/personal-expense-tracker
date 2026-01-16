@@ -4,7 +4,7 @@ Rebuilds local DB from Google Sheets on app startup
 """
 from datetime import datetime
 from sqlmodel import Session, select
-from backend.models import User, Category1, Category2, Expense
+from backend.models import User, Category1, Category2, Expense, IncomeCategory, Inflow
 from backend.google_sheets_service import google_sheets_service
 from backend.user_mapping import user_sheet_mapping
 import logging
@@ -164,6 +164,91 @@ def hydrate_user_data(session: Session, user_id: str):
     except Exception as e:
         logger.error(f"Error hydrating expenses: {e}")
         session.rollback()
+    
+    # Load income categories and inflows (if sheets exist)
+    if user.income_categories_sheet_id and user.income_categories_sheet_id != "local":
+        try:
+            # Clear existing income data
+            session.query(IncomeCategory).filter(IncomeCategory.user_id == user_id).delete()
+            session.query(Inflow).filter(Inflow.user_id == user_id).delete()
+            session.commit()
+            
+            # Load income categories
+            income_categories_data = google_sheets_service.load_income_categories(user.income_categories_sheet_id)
+            logger.info(f"Loaded {len(income_categories_data)} income categories")
+            
+            income_cat_map = {}  # c2_name -> IncomeCategory object
+            
+            for row in income_categories_data:
+                c2_name = row.get('c2_name', '')
+                is_active_str = str(row.get('is_active', 'TRUE')).upper()
+                is_active = is_active_str == 'TRUE'
+                
+                if not c2_name:
+                    continue
+                
+                income_cat = IncomeCategory(
+                    user_id=user_id,
+                    name=c2_name,
+                    active=is_active
+                )
+                session.add(income_cat)
+                session.flush()
+                income_cat_map[c2_name] = income_cat
+            
+            session.commit()
+            logger.info(f"Hydrated {len(income_cat_map)} income categories")
+            
+            # Load cash inflows
+            if user.cashflows_sheet_id and user.cashflows_sheet_id != "local":
+                inflows_data = google_sheets_service.load_cash_inflows(user.cashflows_sheet_id)
+                
+                for row in inflows_data:
+                    try:
+                        c2_name = row.get('c2_name', '')
+                        sheet_id = row.get('id', '')
+                        
+                        if not c2_name or not sheet_id:
+                            continue
+                        
+                        income_cat = income_cat_map.get(c2_name)
+                        if not income_cat:
+                            logger.warning(f"Income category not found: {c2_name}")
+                            continue
+                        
+                        # Parse date
+                        date_str = row.get('date', '')
+                        try:
+                            inflow_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        except:
+                            inflow_date = datetime.utcnow()
+                        
+                        # Parse deleted status
+                        deleted_str = str(row.get('is_deleted', 'FALSE')).upper()
+                        is_deleted = deleted_str == 'TRUE'
+                        
+                        inflow = Inflow(
+                            user_id=user_id,
+                            sheet_id=sheet_id,
+                            date=inflow_date,
+                            amount=float(row.get('amount', 0)),
+                            category_id=income_cat.id,
+                            category_name=c2_name,
+                            notes=row.get('notes'),
+                            deleted=is_deleted
+                        )
+                        session.add(inflow)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing inflow row: {e}")
+                        continue
+                
+                session.commit()
+                logger.info(f"Hydrated {len(inflows_data)} cash inflows")
+                
+        except Exception as e:
+            logger.error(f"Error hydrating income data: {e}")
+            session.rollback()
     
     logger.info(f"Hydration complete for user {user_id}")
 

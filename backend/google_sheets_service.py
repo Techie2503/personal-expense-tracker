@@ -46,6 +46,14 @@ DEFAULT_CATEGORIES = {
     "Miscellaneous": ["One-off Expenses", "Unplanned", "Unknown"]
 }
 
+# Default income categories
+DEFAULT_INCOME_CATEGORIES = [
+    "Salary",
+    "Interest on Debt",
+    "Stocks / Mutual Funds",
+    "Gifts"
+]
+
 
 # ==========================================================
 # GOOGLE SHEETS SERVICE
@@ -328,6 +336,233 @@ class GoogleSheetsService:
             logger.error(traceback.format_exc())
 
     # ======================================================
+    # INCOME SHEETS MANAGEMENT
+    # ======================================================
+    def get_or_create_income_sheets(
+        self,
+        user_id: str,
+        user_email: str,
+        oauth_access_token: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        Get or create Income-related Google Sheets for a user.
+        Returns income_categories_sheet_id and cashflows_sheet_id.
+        NEVER recreates if IDs exist in persistent storage.
+        """
+        if not self.is_available():
+            logger.warning("Google Sheets not available - using local-only mode")
+            return {"income_categories_sheet_id": "local", "cashflows_sheet_id": "local"}
+        
+        try:
+            # Check if sheets already exist in Drive
+            sheet_ids = self._get_income_sheet_ids(user_id, oauth_access_token)
+            
+            if sheet_ids:
+                logger.info(f"✅ Found existing income sheets for user {user_id}: {sheet_ids}")
+                return sheet_ids
+            
+            # Create new sheets for new user
+            logger.info(f"❌ No existing income sheets found, creating new sheets for user {user_id}")
+            if oauth_access_token:
+                return self._create_income_sheets_oauth(user_id, user_email, oauth_access_token)
+            else:
+                return self._create_income_sheets_sa(user_id, user_email)
+            
+        except Exception as e:
+            logger.error(f"Error in get_or_create_income_sheets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {"income_categories_sheet_id": "local", "cashflows_sheet_id": "local"}
+    
+    def _get_income_sheet_ids(self, user_id: str, oauth_access_token: Optional[str] = None) -> Optional[Dict[str, str]]:
+        """Find existing income sheets for a user"""
+        try:
+            income_categories_title = f"{user_id} - ExpenseTracker_IncomeCategories"
+            cashflows_title = f"{user_id} - ExpenseTracker_Cashflows"
+            
+            logger.info(f"Searching for income sheets: '{income_categories_title}' and '{cashflows_title}'")
+            
+            income_categories_sheet = None
+            cashflows_sheet = None
+            
+            if oauth_access_token:
+                # Search in user's Drive
+                logger.info("Using OAuth token to search user's Drive for income sheets")
+                oauth_creds = OAuthCredentials(token=oauth_access_token)
+                drive = build("drive", "v3", credentials=oauth_creds)
+                
+                # Search for sheets by name
+                query = f"(name='{income_categories_title}' or name='{cashflows_title}') and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+                results = drive.files().list(q=query, fields="files(id, name)").execute()
+                
+                logger.info(f"Found {len(results.get('files', []))} matching income files in Drive")
+                
+                for file in results.get('files', []):
+                    logger.info(f"  - {file['name']}: {file['id']}")
+                    if file['name'] == income_categories_title:
+                        income_categories_sheet = file['id']
+                    elif file['name'] == cashflows_title:
+                        cashflows_sheet = file['id']
+            else:
+                # Search in service account's Drive (fallback)
+                logger.info("Using Service Account to search for income sheets")
+                for sheet in self.sa_client.openall():
+                    if sheet.title == income_categories_title:
+                        income_categories_sheet = sheet.id
+                    elif sheet.title == cashflows_title:
+                        cashflows_sheet = sheet.id
+                        
+                    if income_categories_sheet and cashflows_sheet:
+                        break
+            
+            if income_categories_sheet and cashflows_sheet:
+                logger.info(f"Both income sheets found!")
+                return {
+                    "income_categories_sheet_id": income_categories_sheet,
+                    "cashflows_sheet_id": cashflows_sheet
+                }
+            else:
+                logger.info(f"Missing income sheets: categories={bool(income_categories_sheet)}, cashflows={bool(cashflows_sheet)}")
+        except Exception as e:
+            logger.error(f"Error finding income sheets: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        
+        return None
+    
+    def _create_income_sheets_oauth(self, user_id: str, user_email: str, oauth_access_token: str) -> Dict[str, str]:
+        """Create new Income Google Sheets for a user using OAuth (in USER's Drive)"""
+        try:
+            oauth_creds = OAuthCredentials(token=oauth_access_token)
+            drive = build("drive", "v3", credentials=oauth_creds)
+            
+            # Create Income Categories sheet
+            income_categories_title = f"{user_id} - ExpenseTracker_IncomeCategories"
+            income_categories_file = drive.files().create(
+                body={
+                    "name": income_categories_title,
+                    "mimeType": "application/vnd.google-apps.spreadsheet"
+                },
+                fields="id"
+            ).execute()
+            income_categories_id = income_categories_file["id"]
+            
+            logger.info(f"✅ Created Income Categories sheet in user's Drive: {income_categories_id}")
+            
+            # Create Cashflows sheet
+            cashflows_title = f"{user_id} - ExpenseTracker_Cashflows"
+            cashflows_file = drive.files().create(
+                body={
+                    "name": cashflows_title,
+                    "mimeType": "application/vnd.google-apps.spreadsheet"
+                },
+                fields="id"
+            ).execute()
+            cashflows_id = cashflows_file["id"]
+            
+            logger.info(f"✅ Created Cashflows sheet in user's Drive: {cashflows_id}")
+            
+            # Grant service account editor access so it can read/write
+            if self.sa_email:
+                for file_id in [income_categories_id, cashflows_id]:
+                    try:
+                        drive.permissions().create(
+                            fileId=file_id,
+                            body={
+                                "type": "user",
+                                "role": "writer",
+                                "emailAddress": self.sa_email
+                            }
+                        ).execute()
+                        logger.info(f"Granted service account access to {file_id}")
+                    except Exception as perm_error:
+                        logger.warning(f"Could not grant SA permission to {file_id}: {perm_error}")
+            
+            # Seed default income categories
+            self._seed_income_categories(income_categories_id)
+            
+            # Initialize cashflows sheet with headers
+            self._initialize_cashflows_sheet(cashflows_id)
+            
+            logger.info("✅ Income sheets created in USER's Drive")
+            
+            return {
+                "income_categories_sheet_id": income_categories_id,
+                "cashflows_sheet_id": cashflows_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating income sheets with OAuth: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+    
+    def _create_income_sheets_sa(self, user_id: str, user_email: str) -> Dict[str, str]:
+        """Create new Income Google Sheets for a user using Service Account (in SA's Drive)"""
+        try:
+            # Create Income Categories sheet
+            income_categories_title = f"{user_id} - ExpenseTracker_IncomeCategories"
+            income_categories_sheet = self.sa_client.create(income_categories_title)
+            income_categories_worksheet = income_categories_sheet.get_worksheet(0)
+            income_categories_worksheet.update('A1:B1', [['c2_name', 'is_active']])
+            
+            logger.info(f"✅ Created Income Categories sheet: {income_categories_sheet.id}")
+            
+            # Create Cashflows sheet
+            cashflows_title = f"{user_id} - ExpenseTracker_Cashflows"
+            cashflows_sheet = self.sa_client.create(cashflows_title)
+            cashflows_worksheet = cashflows_sheet.get_worksheet(0)
+            cashflows_worksheet.update('A1:G1', [['id', 'date', 'amount', 'c2_name', 'notes', 'created_at', 'is_deleted']])
+            
+            logger.info(f"✅ Created Cashflows sheet: {cashflows_sheet.id}")
+            
+            # Seed default income categories
+            self._seed_income_categories(income_categories_sheet.id)
+            
+            return {
+                "income_categories_sheet_id": income_categories_sheet.id,
+                "cashflows_sheet_id": cashflows_sheet.id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating income sheets: {e}")
+            raise
+    
+    def _seed_income_categories(self, sheet_id: str):
+        """Seed default income categories (ONCE ONLY)"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).get_worksheet(0)
+            
+            # Check if headers exist
+            first_row = sheet.row_values(1)
+            if not first_row or first_row[0] != 'c2_name':
+                # Set headers first
+                sheet.update('A1:B1', [['c2_name', 'is_active']])
+                logger.info(f"Added headers to income categories sheet {sheet_id}")
+            
+            # Build data rows
+            rows = [[cat_name, 'TRUE'] for cat_name in DEFAULT_INCOME_CATEGORIES]
+            
+            if rows:
+                # Append starting from row 2 (after headers)
+                sheet.append_rows(rows)
+                logger.info(f"✅ Seeded {len(rows)} income categories to sheet {sheet_id}")
+                
+        except Exception as e:
+            logger.error(f"Error seeding income categories: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _initialize_cashflows_sheet(self, sheet_id: str):
+        """Initialize cashflows sheet with headers"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).get_worksheet(0)
+            sheet.update('A1:G1', [['id', 'date', 'amount', 'c2_name', 'notes', 'created_at', 'is_deleted']])
+            logger.info(f"Initialized cashflows sheet headers: {sheet_id}")
+        except Exception as e:
+            logger.error(f"Error initializing cashflows sheet: {e}")
+
+    # ======================================================
     # FIND EXISTING SHEETS
     # ======================================================
     def _find_existing_sheets(self, user_id: str) -> Optional[Dict[str, str]]:
@@ -448,6 +683,104 @@ class GoogleSheetsService:
             return False
         except Exception as e:
             logger.error(f"Error marking expense as deleted: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
+    # ======================================================
+    # INCOME CRUD OPERATIONS
+    # ======================================================
+    def load_income_categories(self, sheet_id: str) -> List[Dict]:
+        """Load income categories from Google Sheets"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            records = sheet.get_all_records()
+            logger.info(f"Loaded {len(records)} income categories from sheet {sheet_id}")
+            return records
+        except Exception as e:
+            logger.error(f"Error loading income categories: {e}")
+            return []
+    
+    def add_income_category(self, sheet_id: str, c2_name: str):
+        """Add new income category to Google Sheets"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            sheet.append_row([c2_name, "TRUE"])
+            logger.info(f"✅ Added income category '{c2_name}' to sheet {sheet_id}")
+        except Exception as e:
+            logger.error(f"Error adding income category: {e}")
+            raise
+    
+    def update_income_category_status(self, sheet_id: str, c2_name: str, is_active: bool):
+        """Update the is_active status of an income category"""
+        try:
+            logger.info(f"Updating income category status: {c2_name} → is_active={is_active}")
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            all_values = sheet.get_all_values()
+            
+            for i, row in enumerate(all_values):
+                if len(row) >= 2 and row[0] == c2_name:
+                    # Update column B (is_active)
+                    new_value = "TRUE" if is_active else "FALSE"
+                    sheet.update_cell(i + 1, 2, new_value)
+                    logger.info(f"✅ Updated income category {c2_name} is_active to {new_value} at row {i+1}")
+                    return
+            
+            logger.warning(f"❌ Income category {c2_name} not found in sheet {sheet_id}")
+        except Exception as e:
+            logger.error(f"Error updating income category status: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def load_cash_inflows(self, sheet_id: str) -> List[Dict]:
+        """Load cash inflows from Google Sheets"""
+        try:
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            records = sheet.get_all_records()
+            logger.info(f"Loaded {len(records)} cash inflows from sheet {sheet_id}")
+            return records
+        except Exception as e:
+            logger.error(f"Error loading cash inflows: {e}")
+            return []
+    
+    def append_cash_inflow(self, sheet_id: str, inflow_data: Dict):
+        """Append cash inflow to Google Sheets (matches 7-column header)"""
+        try:
+            import uuid
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            sheet.append_row([
+                inflow_data.get("id", str(uuid.uuid4())),  # UUID
+                inflow_data.get("date"),
+                inflow_data.get("amount"),
+                inflow_data.get("c2_name"),  # category name
+                inflow_data.get("notes", ""),
+                inflow_data.get("created_at"),
+                "FALSE"  # is_deleted - always FALSE for new inflows
+            ])
+            logger.info(f"✅ Appended cash inflow to sheet {sheet_id}")
+        except Exception as e:
+            logger.error(f"Error appending cash inflow: {e}")
+            raise
+    
+    def soft_delete_cash_inflow(self, sheet_id: str, inflow_id: str):
+        """Soft delete a cash inflow by setting is_deleted to TRUE"""
+        try:
+            logger.info(f"Soft deleting cash inflow: id={inflow_id}")
+            sheet = self.sa_client.open_by_key(sheet_id).sheet1
+            all_values = sheet.get_all_values()
+            
+            # Skip header row, find matching inflow by ID
+            for i, row in enumerate(all_values[1:], start=2):  # Start from row 2 (1-indexed)
+                if len(row) >= 7 and row[0] == inflow_id:
+                    # Update column G (is_deleted) to "TRUE"
+                    sheet.update_cell(i, 7, "TRUE")
+                    logger.info(f"✅ Marked cash inflow as deleted at row {i}")
+                    return True
+            
+            logger.warning(f"❌ Cash inflow {inflow_id} not found in sheet")
+            return False
+        except Exception as e:
+            logger.error(f"Error soft deleting cash inflow: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
