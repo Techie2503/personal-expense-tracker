@@ -1132,6 +1132,37 @@ async function updateQueueStatus() {
 }
 
 /**
+ * Refresh data from Google Sheets
+ */
+async function handleRefreshData() {
+    const resultEl = document.getElementById('refreshResult');
+    const refreshBtn = document.getElementById('refreshDataBtn');
+    
+    resultEl.textContent = '🔄 Refreshing data from Google Sheets...';
+    resultEl.className = 'status-message';
+    resultEl.style.display = 'block';
+    refreshBtn.disabled = true;
+    
+    try {
+        await apiPost('/sync/hydrate', {});
+        
+        resultEl.textContent = '✅ Data refreshed successfully! Reloading...';
+        resultEl.className = 'status-message success';
+        
+        // Reload the current screen after a brief delay
+        setTimeout(() => {
+            location.reload();
+        }, 1500);
+        
+    } catch (error) {
+        console.error('Refresh error:', error);
+        resultEl.textContent = `❌ Refresh failed: ${error.message}`;
+        resultEl.className = 'status-message error';
+        refreshBtn.disabled = false;
+    }
+}
+
+/**
  * Manual sync button handler
  */
 async function handleManualSync() {
@@ -1376,6 +1407,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Settings sync button
     document.getElementById('syncNowBtn').addEventListener('click', handleManualSync);
+    
+    // Settings refresh data button
+    document.getElementById('refreshDataBtn').addEventListener('click', handleRefreshData);
     
     // Initialize app
     initApp();
