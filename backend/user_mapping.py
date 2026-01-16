@@ -1,6 +1,6 @@
 """
 User Sheet Mapping
-Stores user_id → {categories_sheet_id, expenses_sheet_id} mapping
+Stores user_id → {categories_sheet_id, expenses_sheet_id, income_categories_sheet_id, cashflows_sheet_id} mapping
 Persists in a simple JSON file (or can be extended to use a database)
 """
 import json
@@ -44,14 +44,39 @@ class UserSheetMapping:
         """Get sheet IDs for a user"""
         return self.mappings.get(user_id)
     
-    def set_user_sheets(self, user_id: str, categories_sheet_id: str, expenses_sheet_id: str):
+    def set_user_sheets(
+        self, 
+        user_id: str, 
+        categories_sheet_id: str, 
+        expenses_sheet_id: str,
+        income_categories_sheet_id: Optional[str] = None,
+        cashflows_sheet_id: Optional[str] = None
+    ):
         """Set sheet IDs for a user"""
-        self.mappings[user_id] = {
-            "categories_sheet_id": categories_sheet_id,
-            "expenses_sheet_id": expenses_sheet_id
-        }
+        if user_id not in self.mappings:
+            self.mappings[user_id] = {}
+        
+        self.mappings[user_id]["categories_sheet_id"] = categories_sheet_id
+        self.mappings[user_id]["expenses_sheet_id"] = expenses_sheet_id
+        
+        if income_categories_sheet_id:
+            self.mappings[user_id]["income_categories_sheet_id"] = income_categories_sheet_id
+        if cashflows_sheet_id:
+            self.mappings[user_id]["cashflows_sheet_id"] = cashflows_sheet_id
+        
         self._save_mappings()
         logger.info(f"Stored sheet mapping for user {user_id}")
+    
+    def set_income_sheets(self, user_id: str, income_categories_sheet_id: str, cashflows_sheet_id: str):
+        """Set income-related sheet IDs for existing user"""
+        if user_id not in self.mappings:
+            logger.error(f"Cannot set income sheets for non-existent user {user_id}")
+            return
+        
+        self.mappings[user_id]["income_categories_sheet_id"] = income_categories_sheet_id
+        self.mappings[user_id]["cashflows_sheet_id"] = cashflows_sheet_id
+        self._save_mappings()
+        logger.info(f"Stored income sheet mapping for user {user_id}")
     
     def user_exists(self, user_id: str) -> bool:
         """Check if user has sheets configured"""

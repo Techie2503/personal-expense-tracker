@@ -19,10 +19,13 @@ import logging
 from backend.database import create_db_and_tables, get_session
 from backend.models import (
     User, Category1, Category2, Expense,
+    IncomeCategory, Inflow,
     UserResponse, LoginRequest,
     Category1Create, Category1Update,
     Category2Create, Category2Update,
-    ExpenseCreate, ExpenseUpdate
+    ExpenseCreate, ExpenseUpdate,
+    IncomeCategoryCreate, IncomeCategoryUpdate,
+    InflowCreate, InflowUpdate
 )
 from backend.auth import verify_google_token
 from backend.google_sheets_service import google_sheets_service
@@ -136,6 +139,13 @@ def google_login(login_req: LoginRequest, session: Session = Depends(get_session
             oauth_access_token=access_token
         )
         
+        # Get or create Income sheets
+        income_sheet_ids = google_sheets_service.get_or_create_income_sheets(
+            user_id,
+            email,
+            oauth_access_token=access_token
+        )
+        
         # Create user record
         user = User(
             user_id=user_id,
@@ -144,6 +154,8 @@ def google_login(login_req: LoginRequest, session: Session = Depends(get_session
             picture=picture,
             categories_sheet_id=sheet_ids['categories_sheet_id'],
             expenses_sheet_id=sheet_ids['expenses_sheet_id'],
+            income_categories_sheet_id=income_sheet_ids['income_categories_sheet_id'],
+            cashflows_sheet_id=income_sheet_ids['cashflows_sheet_id'],
             oauth_access_token=access_token
         )
         session.add(user)
@@ -153,7 +165,9 @@ def google_login(login_req: LoginRequest, session: Session = Depends(get_session
         user_sheet_mapping.set_user_sheets(
             user_id,
             sheet_ids['categories_sheet_id'],
-            sheet_ids['expenses_sheet_id']
+            sheet_ids['expenses_sheet_id'],
+            income_sheet_ids['income_categories_sheet_id'],
+            income_sheet_ids['cashflows_sheet_id']
         )
         
         # Hydrate data from sheets (will load seeded categories)
@@ -196,6 +210,20 @@ def logout():
     return {"message": "Logged out successfully"}
 
 
+# ============== HELPER: Get User from Request ==============
+
+def get_user_id_from_query(user_id: str = Query(...)) -> str:
+    """
+    Extract user_id from query parameter
+    Used as dependency for all protected endpoints
+    """
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID required")
+    return user_id
+
+
+# ============== SYNC / HYDRATION ==============
+
 @app.post("/api/sync/hydrate")
 def sync_hydrate(
     user_id: str = Depends(get_user_id_from_query),
@@ -225,18 +253,6 @@ def sync_hydrate(
     except Exception as e:
         logger.error(f"Error during manual hydration for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Hydration failed: {str(e)}")
-
-
-# ============== HELPER: Get User from Request ==============
-
-def get_user_id_from_query(user_id: str = Query(...)) -> str:
-    """
-    Extract user_id from query parameter
-    Used as dependency for all protected endpoints
-    """
-    if not user_id:
-        raise HTTPException(status_code=401, detail="User ID required")
-    return user_id
 
 
 # ============== CATEGORY ENDPOINTS ==============
@@ -570,6 +586,230 @@ def delete_expense(
         logger.error(f"Error syncing expense deletion to sheets: {e}")
     
     return {"message": "Expense deleted successfully", "id": expense_id}
+
+
+# ============== INCOME ENDPOINTS ==============
+
+@app.get("/api/income/categories")
+def get_income_categories(
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """Get all income categories for user"""
+    categories = session.exec(
+        select(IncomeCategory)
+        .where(IncomeCategory.user_id == user_id)
+        .order_by(IncomeCategory.name)
+    ).all()
+    return categories
+
+
+@app.post("/api/income/categories", response_model=IncomeCategory)
+def create_income_category(
+    category: IncomeCategoryCreate,
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """Create new income category"""
+    # Check if name already exists for this user
+    existing = session.exec(
+        select(IncomeCategory).where(
+            and_(IncomeCategory.user_id == user_id, IncomeCategory.name == category.name)
+        )
+    ).first()
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Income category name already exists")
+    
+    db_category = IncomeCategory(user_id=user_id, name=category.name, active=True)
+    session.add(db_category)
+    session.commit()
+    session.refresh(db_category)
+    
+    logger.info(f"Created income category: {db_category.name} for user {user_id}")
+    
+    # Sync to Google Sheets
+    try:
+        user = session.get(User, user_id)
+        if user and user.income_categories_sheet_id and user.income_categories_sheet_id != "local":
+            google_sheets_service.add_income_category(
+                user.income_categories_sheet_id,
+                db_category.name
+            )
+            logger.info(f"Synced new income category to Google Sheets: {db_category.name}")
+    except Exception as e:
+        logger.error(f"Error syncing income category to sheets: {e}")
+    
+    return db_category
+
+
+@app.put("/api/income/categories/{category_id}", response_model=IncomeCategory)
+def update_income_category(
+    category_id: int,
+    category_update: IncomeCategoryUpdate,
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """Update income category"""
+    db_category = session.get(IncomeCategory, category_id)
+    if not db_category or db_category.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Income category not found")
+    
+    if category_update.name is not None:
+        db_category.name = category_update.name
+    if category_update.active is not None:
+        db_category.active = category_update.active
+        
+        # Sync to Google Sheets
+        user = session.get(User, user_id)
+        if user and user.income_categories_sheet_id:
+            try:
+                google_sheets_service.update_income_category_status(
+                    user.income_categories_sheet_id,
+                    db_category.name,
+                    db_category.active
+                )
+            except Exception as e:
+                logger.error(f"Failed to sync income category to Sheets: {e}")
+    
+    session.add(db_category)
+    session.commit()
+    session.refresh(db_category)
+    
+    logger.info(f"Updated income category: {db_category.name} for user {user_id}")
+    return db_category
+
+
+@app.get("/api/inflows")
+def get_inflows(
+    user_id: str = Depends(get_user_id_from_query),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=100000),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session)
+):
+    """Get cash inflows for user with optional filtering"""
+    query = select(Inflow).where(
+        and_(Inflow.user_id == user_id, Inflow.deleted == False)
+    )
+    
+    # Apply date filters
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.where(Inflow.date >= start_dt)
+        except ValueError:
+            pass
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.where(Inflow.date <= end_dt)
+        except ValueError:
+            pass
+    
+    query = query.order_by(Inflow.date.desc()).offset(offset).limit(limit)
+    
+    inflows = session.exec(query).all()
+    
+    # Get total count
+    count_query = select(func.count(Inflow.id)).where(
+        and_(Inflow.user_id == user_id, Inflow.deleted == False)
+    )
+    total = session.exec(count_query).one()
+    
+    return {
+        "inflows": inflows,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+
+@app.post("/api/inflows", response_model=Inflow)
+def create_inflow(
+    inflow: InflowCreate,
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """Create new cash inflow"""
+    # Verify category belongs to user
+    category = session.get(IncomeCategory, inflow.category_id)
+    if not category or category.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Income category not found")
+    
+    import uuid
+    sheet_id = str(uuid.uuid4())
+    
+    db_inflow = Inflow(
+        user_id=user_id,
+        sheet_id=sheet_id,
+        date=inflow.date,
+        amount=inflow.amount,
+        category_id=category.id,
+        category_name=category.name,
+        notes=inflow.notes,
+        deleted=False
+    )
+    session.add(db_inflow)
+    session.commit()
+    session.refresh(db_inflow)
+    
+    # Sync to Google Sheets
+    user = session.get(User, user_id)
+    if user and user.cashflows_sheet_id and user.cashflows_sheet_id != "local":
+        try:
+            google_sheets_service.append_cash_inflow(
+                user.cashflows_sheet_id,
+                {
+                    'id': sheet_id,
+                    'date': db_inflow.date.isoformat(),
+                    'amount': db_inflow.amount,
+                    'c2_name': db_inflow.category_name,
+                    'notes': db_inflow.notes or '',
+                    'created_at': db_inflow.created_at.isoformat()
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to sync inflow to Sheets: {e}")
+    
+    logger.info(f"Created inflow for user {user_id}: {db_inflow.amount}")
+    return db_inflow
+
+
+@app.delete("/api/inflows/{inflow_id}")
+def delete_inflow(
+    inflow_id: int,
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """Soft delete cash inflow"""
+    db_inflow = session.get(Inflow, inflow_id)
+    if not db_inflow or db_inflow.user_id != user_id or db_inflow.deleted:
+        raise HTTPException(status_code=404, detail="Inflow not found")
+    
+    # Mark as deleted in DB
+    db_inflow.deleted = True
+    db_inflow.updated_at = datetime.utcnow()
+    session.add(db_inflow)
+    session.commit()
+    
+    logger.info(f"Deleted inflow ID: {inflow_id} for user {user_id}")
+    
+    # Sync to Google Sheets
+    try:
+        user = session.get(User, user_id)
+        if user and user.cashflows_sheet_id and user.cashflows_sheet_id != "local":
+            google_sheets_service.soft_delete_cash_inflow(
+                user.cashflows_sheet_id,
+                db_inflow.sheet_id
+            )
+            logger.info(f"Synced inflow deletion to Google Sheets")
+    except Exception as e:
+        logger.error(f"Error syncing inflow deletion to sheets: {e}")
+    
+    return {"message": "Inflow deleted successfully", "id": inflow_id}
 
 
 # ============== INSIGHTS ENDPOINTS ==============

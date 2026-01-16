@@ -38,6 +38,7 @@
         <div class="nav-tabs">
             <button class="nav-tab active" data-screen="add">Add Expense</button>
             <button class="nav-tab" data-screen="list">Expenses</button>
+            <button class="nav-tab" data-screen="income">Income</button>
             <button class="nav-tab" data-screen="insights">Insights</button>
             <button class="nav-tab" data-screen="categories">Categories</button>
             <button class="nav-tab" data-screen="settings">Settings</button>
@@ -140,6 +141,69 @@
                     <button class="btn btn-sm" id="prevPageBtn" disabled>Previous</button>
                     <span id="pageInfo">Page 1</span>
                     <button class="btn btn-sm" id="nextPageBtn">Next</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Income Screen -->
+        <div id="incomeScreen" class="screen">
+            <div class="card">
+                <h2>Add Cash Inflow</h2>
+                <form id="inflowForm">
+                    <div class="form-group">
+                        <label for="inflowDate">Date *</label>
+                        <input type="datetime-local" id="inflowDate" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="inflowAmount">Amount (₹) *</label>
+                        <input type="number" id="inflowAmount" step="0.01" min="0" required placeholder="0.00">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="inflowCategory">Category *</label>
+                        <select id="inflowCategory" required>
+                            <option value="">Select category...</option>
+                        </select>
+                        <button type="button" class="btn-link" id="addIncomeCatBtn">+ Add new category</button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="inflowNotes">Notes</label>
+                        <textarea id="inflowNotes" rows="3" placeholder="Optional notes..."></textarea>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save Inflow</button>
+                        <button type="button" class="btn btn-secondary" id="clearInflowFormBtn">Clear</button>
+                    </div>
+                </form>
+                
+                <div id="inflowFormStatus" class="status-message" style="display: none;"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="header-with-download">
+                        <h2>Income History</h2>
+                        <button class="btn btn-sm btn-primary" id="downloadInflowsCsvBtn">📥 Download CSV</button>
+                    </div>
+                    <div class="filter-controls">
+                        <input type="date" id="filterInflowStartDate" placeholder="Start Date">
+                        <input type="date" id="filterInflowEndDate" placeholder="End Date">
+                        <button class="btn btn-sm" id="applyInflowFilterBtn">Filter</button>
+                        <button class="btn btn-sm btn-secondary" id="clearInflowFilterBtn">Clear</button>
+                    </div>
+                </div>
+                
+                <div id="inflowsList" class="expenses-list">
+                    <div class="loading">Loading inflows...</div>
+                </div>
+                
+                <div class="pagination">
+                    <button class="btn btn-sm" id="prevInflowPageBtn" disabled>Previous</button>
+                    <span id="inflowPageInfo">Page 1</span>
+                    <button class="btn btn-sm" id="nextInflowPageBtn">Next</button>
                 </div>
             </div>
         </div>
@@ -258,6 +322,26 @@
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">Add</button>
                     <button type="button" class="btn btn-secondary" id="cancelC2Btn">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal for adding Income Category -->
+    <div id="addIncomeCatModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add New Income Category</h3>
+                <button class="modal-close" id="closeIncomeCatModal">&times;</button>
+            </div>
+            <form id="addIncomeCatForm">
+                <div class="form-group">
+                    <label for="newIncomeCatName">Category Name</label>
+                    <input type="text" id="newIncomeCatName" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Add</button>
+                    <button type="button" class="btn btn-secondary" id="cancelIncomeCatBtn">Cancel</button>
                 </div>
             </form>
         </div>
