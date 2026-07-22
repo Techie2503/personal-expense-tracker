@@ -62,6 +62,11 @@ if [ -z "$GOOGLE_APPLICATION_CREDENTIALS" ] && [ -z "$GOOGLE_SERVICE_ACCOUNT_JSO
     echo "Google Sheets integration will not work."
 fi
 
+if [ -z "$GEMINI_API_KEY" ]; then
+    echo "⚠️  WARNING: GEMINI_API_KEY not set!"
+    echo "AI expense categorization will be disabled (manual category selection still works)."
+fi
+
 echo ""
 echo "✅ Setup complete!"
 echo ""

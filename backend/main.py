@@ -2,6 +2,7 @@
 FastAPI main application - Multi-User with Google Sheets
 """
 import os
+import base64
 from dotenv import load_dotenv
 
 # Load environment variables from .env file FIRST
@@ -25,12 +26,14 @@ from backend.models import (
     Category2Create, Category2Update,
     ExpenseCreate, ExpenseUpdate,
     IncomeCategoryCreate, IncomeCategoryUpdate,
-    InflowCreate, InflowUpdate
+    InflowCreate, InflowUpdate,
+    AiCategorizeRequest
 )
 from backend.auth import verify_google_token
 from backend.google_sheets_service import google_sheets_service
 from backend.user_mapping import user_sheet_mapping
 from backend.hydration import hydrate_user_data, hydrate_all_users
+from backend.gemini_service import gemini_service, RateLimitedError
 
 # Configure logging
 logging.basicConfig(
@@ -421,6 +424,84 @@ def update_c2_category(
     
     logger.info(f"Updated C2 category: {db_category.name} for user {user_id}")
     return db_category
+
+
+# ============== AI CATEGORIZATION ==============
+
+@app.post("/api/ai/categorize")
+def ai_categorize_expense(
+    payload: AiCategorizeRequest,
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """
+    Suggest a Category1/Category2 pick (plus any extracted amount/date/notes)
+    for each expense described in a free-text description and/or receipt
+    image, using the user's own live category taxonomy. A single expense
+    returns one suggestion; a shopping list or multi-line receipt returns
+    one per line. This is always an assist, never a requirement - on any
+    failure (including rate limiting) the frontend falls back to the
+    existing manual category dropdowns.
+    """
+    if not payload.text and not payload.image_base64:
+        raise HTTPException(status_code=400, detail="Provide text or image_base64")
+
+    c1_list = session.exec(
+        select(Category1).where(and_(Category1.user_id == user_id, Category1.active == True))
+    ).all()
+
+    taxonomy = {}
+    c1_by_name = {}
+    c2_by_name = {}
+    for c1 in c1_list:
+        c2_list = session.exec(
+            select(Category2).where(
+                and_(Category2.c1_id == c1.id, Category2.user_id == user_id, Category2.active == True)
+            )
+        ).all()
+        taxonomy[c1.name] = [c2.name for c2 in c2_list]
+        c1_by_name[c1.name] = c1
+        for c2 in c2_list:
+            c2_by_name[(c1.name, c2.name)] = c2
+
+    image_bytes = None
+    if payload.image_base64:
+        try:
+            image_bytes = base64.b64decode(payload.image_base64)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid image_base64")
+
+    try:
+        suggestions = gemini_service.categorize_expenses(
+            taxonomy=taxonomy, text=payload.text, image_bytes=image_bytes,
+            image_mime_type=payload.image_mime_type
+        )
+    except RateLimitedError:
+        raise HTTPException(
+            status_code=429,
+            detail="AI categorization hit its usage limit - please try again in a few minutes, or pick a category manually."
+        )
+
+    results = []
+    for suggestion in suggestions:
+        c1 = c1_by_name.get(suggestion.c1_name)
+        c2 = c2_by_name.get((suggestion.c1_name, suggestion.c2_name))
+        results.append({
+            "c1_id": c1.id if c1 else None,
+            "c1_name": suggestion.c1_name,
+            "c2_id": c2.id if c2 else None,
+            "c2_name": suggestion.c2_name,
+            "confidence": suggestion.confidence,
+            "amount": suggestion.amount,
+            "date": suggestion.date,
+            "merchant": suggestion.merchant,
+            "notes": suggestion.notes,
+            "payment_mode": suggestion.payment_mode,
+            "need_vs_want": suggestion.need_vs_want,
+            "person": suggestion.person,
+        })
+
+    return {"suggestions": results}
 
 
 # ============== EXPENSE ENDPOINTS ==============
