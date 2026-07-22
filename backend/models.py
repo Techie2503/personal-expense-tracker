@@ -133,12 +133,24 @@ class UserResponse(SQLModel):
     email: str
     name: str
     picture: Optional[str] = None
+    categories_sheet_id: Optional[str] = None
+    expenses_sheet_id: Optional[str] = None
+    income_categories_sheet_id: Optional[str] = None
+    cashflows_sheet_id: Optional[str] = None
 
 
 class LoginRequest(SQLModel):
     id_token: str = ""  # Google ID token (optional if user_info provided)
     access_token: Optional[str] = None  # OAuth access token for Drive access
     user_info: Optional[dict] = None  # User info from OAuth (id, email, name, picture)
+
+
+class HydrationRequest(SQLModel):
+    """Request to hydrate user data - includes sheet IDs from localStorage"""
+    categories_sheet_id: Optional[str] = None
+    expenses_sheet_id: Optional[str] = None
+    income_categories_sheet_id: Optional[str] = None
+    cashflows_sheet_id: Optional[str] = None
 
 
 class Category1Create(SQLModel):

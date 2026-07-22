@@ -1379,7 +1379,15 @@ async function handleRefreshData() {
     refreshBtn.disabled = true;
     
     try {
-        await apiPost('/sync/hydrate', {});
+        // Get sheet IDs from localStorage (stored during login)
+        const userData = getCurrentUser();
+        
+        await apiPost('/sync/hydrate', {
+            categories_sheet_id: userData?.categories_sheet_id,
+            expenses_sheet_id: userData?.expenses_sheet_id,
+            income_categories_sheet_id: userData?.income_categories_sheet_id,
+            cashflows_sheet_id: userData?.cashflows_sheet_id
+        });
         
         resultEl.textContent = '✅ Data refreshed successfully! Reloading...';
         resultEl.className = 'status-message success';

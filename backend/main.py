@@ -14,13 +14,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, func, and_
+from sqlalchemy.exc import IntegrityError
 import logging
 
 from backend.database import create_db_and_tables, get_session
 from backend.models import (
     User, Category1, Category2, Expense,
     IncomeCategory, Inflow,
-    UserResponse, LoginRequest,
+    UserResponse, LoginRequest, HydrationRequest,
     Category1Create, Category1Update,
     Category2Create, Category2Update,
     ExpenseCreate, ExpenseUpdate,
@@ -179,7 +180,11 @@ def google_login(login_req: LoginRequest, session: Session = Depends(get_session
         user_id=user.user_id,
         email=user.email,
         name=user.name,
-        picture=user.picture
+        picture=user.picture,
+        categories_sheet_id=user.categories_sheet_id,
+        expenses_sheet_id=user.expenses_sheet_id,
+        income_categories_sheet_id=user.income_categories_sheet_id,
+        cashflows_sheet_id=user.cashflows_sheet_id
     )
 
 
@@ -226,32 +231,68 @@ def get_user_id_from_query(user_id: str = Query(...)) -> str:
 
 @app.post("/api/sync/hydrate")
 def sync_hydrate(
+    hydration_req: HydrationRequest,
     user_id: str = Depends(get_user_id_from_query),
     session: Session = Depends(get_session)
 ):
     """
     Manually trigger hydration from Google Sheets for the current user
     Useful after server restarts (e.g. Render free tier redeploys)
+    If user doesn't exist in DB (wiped after redeploy), recreates from sheet IDs stored in localStorage
     """
     try:
-        # Verify user exists
+        # Check if user exists in DB
         user = session.get(User, user_id)
+        
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            # User was wiped from DB after redeploy - recreate from localStorage sheet IDs
+            logger.warning(f"User {user_id} not found in DB after redeploy, recreating from localStorage")
+            
+            if not hydration_req.categories_sheet_id or not hydration_req.expenses_sheet_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Sheet IDs required to recreate user. Please log out and log in again."
+                )
+            
+            # Recreate user record with sheet IDs from localStorage
+            user = User(
+                user_id=user_id,
+                email=f"{user_id}@rehydrated.com",  # Placeholder, will be updated on next login
+                name="User",  # Placeholder
+                categories_sheet_id=hydration_req.categories_sheet_id,
+                expenses_sheet_id=hydration_req.expenses_sheet_id,
+                income_categories_sheet_id=hydration_req.income_categories_sheet_id,
+                cashflows_sheet_id=hydration_req.cashflows_sheet_id
+            )
+            session.add(user)
+            try:
+                session.commit()
+                logger.info(f"✅ Recreated user record for {user_id} from localStorage sheet IDs")
+            except IntegrityError:
+                # A concurrent hydrate request already recreated this user - use the existing record
+                session.rollback()
+                logger.info(f"User {user_id} was recreated concurrently, using existing record")
+                user = session.get(User, user_id)
+                if not user:
+                    raise HTTPException(status_code=500, detail="Failed to recreate user record")
         
         logger.info(f"Manual hydration requested for user: {user.email}")
         
         # Trigger hydration
         hydrate_user_data(session, user_id)
         
-        logger.info(f"Manual hydration completed for user: {user.email}")
+        logger.info(f"✅ Manual hydration completed for user: {user.email}")
         
         return {
             "message": "Data refreshed successfully from Google Sheets",
             "user_id": user_id
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error during manual hydration for user {user_id}: {e}")
+        logger.error(f"❌ Error during manual hydration for user {user_id}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Hydration failed: {str(e)}")
 
 
