@@ -18,25 +18,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Tried in order; on any error (quota exhausted, model unavailable, etc.) we
-# fall back to the next one. Override with a comma-separated GEMINI_MODEL_FALLBACK
-# env var if you want a different chain - these are the exact model IDs the
-# configured API key had access to at the time this was written.
-DEFAULT_MODEL_FALLBACK = [
-    "gemini-flash-latest",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
-]
-_fallback_env = os.getenv("GEMINI_MODEL_FALLBACK")
-GEMINI_MODELS = (
-    [m.strip() for m in _fallback_env.split(",") if m.strip()]
-    if _fallback_env else DEFAULT_MODEL_FALLBACK
-)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
 
 class ExpenseSuggestion(BaseModel):
@@ -67,10 +49,6 @@ class GeminiService:
         self._client = genai.Client(api_key=api_key) if api_key else None
         if not self._client:
             logger.warning("GEMINI_API_KEY not set; AI categorization is disabled")
-        # Index into GEMINI_MODELS of the last model that worked - once we
-        # fall back, later calls start there instead of retrying tiers we
-        # already know are unavailable this session.
-        self._model_index = 0
 
     def _taxonomy_text(self, taxonomy: Dict[str, List[str]]) -> str:
         return "\n".join(
@@ -83,32 +61,23 @@ class GeminiService:
             response_mime_type="application/json",
             response_schema=ExpenseSuggestionBatch,
         )
-        last_error = None
-        for i in range(self._model_index, len(GEMINI_MODELS)):
-            model = GEMINI_MODELS[i]
-            try:
-                response = self._client.models.generate_content(
-                    model=model,
-                    contents=parts,
-                    config=config,
-                )
-            except (errors.ClientError, errors.ServerError) as e:
-                logger.warning(f"Gemini model '{model}' failed ({e}); trying next fallback model")
-                last_error = e
-                continue
+        try:
+            response = self._client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=parts,
+                config=config,
+            )
+        except errors.ClientError as e:
+            if e.code == 429:
+                raise RateLimitedError(str(e)) from e
+            logger.error(f"Gemini client error: {e}")
+            return None
+        except errors.ServerError as e:
+            logger.error(f"Gemini server error: {e}")
+            return None
 
-            if i != self._model_index:
-                logger.info(f"Falling back to Gemini model '{model}'")
-                self._model_index = i
-            parsed = response.parsed
-            return parsed.items if isinstance(parsed, ExpenseSuggestionBatch) else None
-
-        # Every model in the fallback chain failed
-        if isinstance(last_error, errors.ClientError) and last_error.code == 429:
-            raise RateLimitedError(str(last_error))
-        if last_error:
-            logger.error(f"All Gemini fallback models failed; last error: {last_error}")
-        return None
+        parsed = response.parsed
+        return parsed.items if isinstance(parsed, ExpenseSuggestionBatch) else None
 
     def categorize_expenses(
         self,
