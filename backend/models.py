@@ -171,6 +171,16 @@ class Category2Update(SQLModel):
     active: Optional[bool] = None
 
 
+class AiCategorizeRequest(SQLModel):
+    text: Optional[str] = None
+    image_base64: Optional[str] = None
+    image_mime_type: str = "image/jpeg"
+
+
+class AiCategorizeIncomeRequest(SQLModel):
+    text: Optional[str] = None
+
+
 class ExpenseCreate(SQLModel):
     date: datetime
     amount: float = Field(ge=0)

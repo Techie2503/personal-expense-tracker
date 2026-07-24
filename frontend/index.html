@@ -49,6 +49,26 @@
     <main class="container">
         <!-- Add Expense Screen -->
         <div id="addScreen" class="screen active">
+            <div class="card" id="aiAssistCard">
+                <h2>✨ AI Assist</h2>
+                <p class="ai-assist-hint">Type, speak, or upload a receipt photo — AI will suggest a category.</p>
+
+                <form id="aiAssistForm" class="inline-form">
+                    <input type="text" id="aiText" placeholder="e.g. 250 for coffee at Starbucks">
+                    <button type="button" class="btn btn-secondary" id="aiMicBtn" style="display: none;" title="Speak">🎤</button>
+                    <button type="submit" class="btn btn-primary">Suggest category</button>
+                </form>
+
+                <div class="inline-form">
+                    <label for="aiImageInput" class="btn btn-secondary btn-file-label">📷 Add receipt photo</label>
+                    <input type="file" id="aiImageInput" accept="image/*" style="display: none;">
+                    <span id="aiImageFileName" class="ai-image-filename"></span>
+                </div>
+
+                <div id="aiSuggestion" class="ai-suggestion" style="display: none;"></div>
+                <div id="aiStatus" class="status-message" style="display: none;"></div>
+            </div>
+
             <div class="card">
                 <h2>Add New Expense</h2>
                 <form id="expenseForm">
@@ -147,6 +167,20 @@
 
         <!-- Income Screen -->
         <div id="incomeScreen" class="screen">
+            <div class="card" id="aiIncomeAssistCard">
+                <h2>✨ AI Assist</h2>
+                <p class="ai-assist-hint">Type or speak — AI will suggest a category.</p>
+
+                <form id="aiIncomeAssistForm" class="inline-form">
+                    <input type="text" id="aiIncomeText" placeholder="e.g. got 5000 salary">
+                    <button type="button" class="btn btn-secondary" id="aiIncomeMicBtn" style="display: none;" title="Speak">🎤</button>
+                    <button type="submit" class="btn btn-primary">Suggest category</button>
+                </form>
+
+                <div id="aiIncomeSuggestion" class="ai-suggestion" style="display: none;"></div>
+                <div id="aiIncomeStatus" class="status-message" style="display: none;"></div>
+            </div>
+
             <div class="card">
                 <h2>Add Cash Inflow</h2>
                 <form id="inflowForm">
