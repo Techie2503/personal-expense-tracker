@@ -165,6 +165,10 @@ class AiCategorizeRequest(SQLModel):
     image_mime_type: str = "image/jpeg"
 
 
+class AiCategorizeIncomeRequest(SQLModel):
+    text: Optional[str] = None
+
+
 class ExpenseCreate(SQLModel):
     date: datetime
     amount: float = Field(ge=0)

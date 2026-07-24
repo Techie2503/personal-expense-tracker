@@ -167,6 +167,20 @@
 
         <!-- Income Screen -->
         <div id="incomeScreen" class="screen">
+            <div class="card" id="aiIncomeAssistCard">
+                <h2>✨ AI Assist</h2>
+                <p class="ai-assist-hint">Type or speak — AI will suggest a category.</p>
+
+                <form id="aiIncomeAssistForm" class="inline-form">
+                    <input type="text" id="aiIncomeText" placeholder="e.g. got 5000 salary">
+                    <button type="button" class="btn btn-secondary" id="aiIncomeMicBtn" style="display: none;" title="Speak">🎤</button>
+                    <button type="submit" class="btn btn-primary">Suggest category</button>
+                </form>
+
+                <div id="aiIncomeSuggestion" class="ai-suggestion" style="display: none;"></div>
+                <div id="aiIncomeStatus" class="status-message" style="display: none;"></div>
+            </div>
+
             <div class="card">
                 <h2>Add Cash Inflow</h2>
                 <form id="inflowForm">

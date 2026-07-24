@@ -27,7 +27,7 @@ from backend.models import (
     ExpenseCreate, ExpenseUpdate,
     IncomeCategoryCreate, IncomeCategoryUpdate,
     InflowCreate, InflowUpdate,
-    AiCategorizeRequest
+    AiCategorizeRequest, AiCategorizeIncomeRequest
 )
 from backend.auth import verify_google_token
 from backend.google_sheets_service import google_sheets_service
@@ -499,6 +499,55 @@ def ai_categorize_expense(
             "payment_mode": suggestion.payment_mode,
             "need_vs_want": suggestion.need_vs_want,
             "person": suggestion.person,
+        })
+
+    return {"suggestions": results}
+
+
+@app.post("/api/ai/categorize-income")
+def ai_categorize_income(
+    payload: AiCategorizeIncomeRequest,
+    user_id: str = Depends(get_user_id_from_query),
+    session: Session = Depends(get_session)
+):
+    """
+    Suggest an income category (plus any extracted amount/date/notes) for
+    each entry described in a free-text description - a single inflow
+    returns one suggestion, "got 5000 salary and 200 cashback" returns two.
+    Text only (no receipt image support for income). Always an assist,
+    never a requirement - on any failure (including rate limiting) the
+    frontend falls back to the existing manual category dropdown.
+    """
+    if not payload.text:
+        raise HTTPException(status_code=400, detail="Provide text")
+
+    income_categories = session.exec(
+        select(IncomeCategory).where(
+            and_(IncomeCategory.user_id == user_id, IncomeCategory.active == True)
+        )
+    ).all()
+    category_by_name = {c.name: c for c in income_categories}
+
+    try:
+        suggestions = gemini_service.categorize_income(
+            categories=list(category_by_name.keys()), text=payload.text
+        )
+    except RateLimitedError:
+        raise HTTPException(
+            status_code=429,
+            detail="AI categorization hit its usage limit - please try again in a few minutes, or pick a category manually."
+        )
+
+    results = []
+    for suggestion in suggestions:
+        category = category_by_name.get(suggestion.category_name)
+        results.append({
+            "category_id": category.id if category else None,
+            "category_name": suggestion.category_name,
+            "confidence": suggestion.confidence,
+            "amount": suggestion.amount,
+            "date": suggestion.date,
+            "notes": suggestion.notes,
         })
 
     return {"suggestions": results}

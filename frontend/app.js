@@ -23,9 +23,8 @@ let charts = {};
 let deferredPrompt = null;
 let currentUser = null;  // Current logged-in user
 let aiSelectedImageFile = null;
-let aiRecognition = null;
-let aiListening = false;
 let aiBulkItems = [];
+let aiIncomeBulkItems = [];
 
 // ==================== AUTHENTICATION ====================
 /**
@@ -822,39 +821,40 @@ async function handleAiCategorize(event) {
  * available (Chrome/Edge). Left hidden on browsers without support
  * (notably iOS Safari) rather than showing a broken control.
  */
-function setupAiSpeechRecognition() {
+function setupSpeechRecognitionButton(micBtnId, textFieldId, statusElementId) {
     const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const micBtn = document.getElementById('aiMicBtn');
+    const micBtn = document.getElementById(micBtnId);
     if (!SpeechRecognitionCtor) {
         return;
     }
 
-    aiRecognition = new SpeechRecognitionCtor();
-    aiRecognition.lang = 'en-IN';
-    aiRecognition.interimResults = false;
-    aiRecognition.maxAlternatives = 1;
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'en-IN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    let listening = false;
 
-    aiRecognition.onresult = (event) => {
-        document.getElementById('aiText').value = event.results[0][0].transcript;
+    recognition.onresult = (event) => {
+        document.getElementById(textFieldId).value = event.results[0][0].transcript;
     };
-    aiRecognition.onerror = (event) => {
+    recognition.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
-        showStatus('aiStatus', 'Could not capture voice input. Try typing instead.', 'warning');
+        showStatus(statusElementId, 'Could not capture voice input. Try typing instead.', 'warning');
     };
-    aiRecognition.onend = () => {
-        aiListening = false;
+    recognition.onend = () => {
+        listening = false;
         micBtn.textContent = '🎤';
     };
 
     micBtn.style.display = 'flex';
     micBtn.addEventListener('click', () => {
-        if (aiListening) {
-            aiRecognition.stop();
+        if (listening) {
+            recognition.stop();
             return;
         }
-        aiListening = true;
+        listening = true;
         micBtn.textContent = '⏺️';
-        aiRecognition.start();
+        recognition.start();
     });
 }
 
@@ -1151,13 +1151,232 @@ async function handleInflowSubmit(event) {
         // Clear form
         document.getElementById('inflowForm').reset();
         setDefaultInflowDateTime();
-        
+        resetAiIncomeAssist();
+
         // Reload list
         await loadInflows();
         
     } catch (error) {
         console.error('Error saving inflow:', error);
         showStatus('inflowFormStatus', '❌ Error: ' + error.message, 'error');
+    }
+}
+
+// ==================== AI ASSIST (INCOME) ====================
+/**
+ * Clear the income AI Assist input/suggestion (called after an inflow is saved/cleared)
+ */
+function resetAiIncomeAssist() {
+    document.getElementById('aiIncomeText').value = '';
+    document.getElementById('aiIncomeSuggestion').style.display = 'none';
+}
+
+/**
+ * Fill the existing Add Cash Inflow form fields from an accepted AI suggestion
+ */
+function applyAiIncomeSuggestion(suggestion) {
+    if (suggestion.category_id) {
+        document.getElementById('inflowCategory').value = suggestion.category_id;
+    }
+    if (suggestion.amount) {
+        document.getElementById('inflowAmount').value = suggestion.amount;
+    }
+    const normalizedDate = normalizeToDatetimeLocal(suggestion.date);
+    if (normalizedDate) {
+        document.getElementById('inflowDate').value = normalizedDate;
+    }
+    const notesField = document.getElementById('inflowNotes');
+    if (!notesField.value && suggestion.notes) {
+        notesField.value = suggestion.notes;
+    }
+    showStatus('inflowFormStatus', '✅ AI suggestion applied — review and save.', 'success');
+}
+
+/**
+ * Render a single AI income suggestion with Accept/Dismiss actions, or a
+ * "no suggestion" note
+ */
+function renderAiIncomeSuggestion(suggestion) {
+    const box = document.getElementById('aiIncomeSuggestion');
+
+    if (!suggestion || !suggestion.category_name) {
+        box.style.display = 'none';
+        showStatus('aiIncomeStatus', "Couldn't generate a suggestion. Pick a category manually.", 'warning');
+        return;
+    }
+
+    const confidencePct = Math.round((suggestion.confidence || 0) * 100);
+    box.innerHTML = `
+        <div>Suggested: <strong>${suggestion.category_name}</strong> (${confidencePct}% confident)</div>
+        ${suggestion.amount ? `<div>Amount: ₹${suggestion.amount}</div>` : ''}
+        <div class="ai-suggestion-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="aiIncomeAcceptBtn">Accept</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="aiIncomeDismissBtn">Dismiss</button>
+        </div>
+    `;
+    box.style.display = 'block';
+
+    document.getElementById('aiIncomeDismissBtn').addEventListener('click', () => {
+        box.style.display = 'none';
+    });
+    document.getElementById('aiIncomeAcceptBtn').addEventListener('click', () => {
+        applyAiIncomeSuggestion(suggestion);
+        box.style.display = 'none';
+    });
+}
+
+/**
+ * Render a preview list for multiple parsed income entries (e.g. "got 5000
+ * salary and 200 cashback") - one row per item, each with its own editable
+ * date, amount, and an include checkbox. "Save All" posts one inflow per
+ * checked row.
+ */
+function renderAiIncomeBulkSuggestions(items) {
+    aiIncomeBulkItems = items;
+    const box = document.getElementById('aiIncomeSuggestion');
+    const today = new Date().toISOString().slice(0, 10);
+
+    const rows = items.map((item, i) => {
+        const confidencePct = Math.round((item.confidence || 0) * 100);
+        const dateValue = (normalizeToDatetimeLocal(item.date) || `${today}T00:00`).slice(0, 10);
+        const matched = !!item.category_id;
+        return `
+            <div class="expense-item">
+                <div class="expense-header">
+                    <label class="ai-bulk-checkbox">
+                        <input type="checkbox" class="ai-income-bulk-include" data-index="${i}"
+                               ${matched ? 'checked' : 'disabled'}>
+                    </label>
+                    <input type="number" step="0.01" min="0" class="ai-bulk-amount ai-income-bulk-amount" data-index="${i}"
+                           value="${item.amount != null ? item.amount : ''}" placeholder="Amount">
+                    <input type="date" class="ai-bulk-date ai-income-bulk-date" data-index="${i}" value="${dateValue}">
+                    <span class="expense-date">${confidencePct}% confident</span>
+                </div>
+                <div class="expense-details">
+                    <span class="expense-category">${item.category_name}</span>
+                </div>
+                ${item.notes ? `<div class="expense-notes">${item.notes}</div>` : ''}
+                ${!matched ? `<div class="ai-assist-hint">⚠️ No matching category found — add this one manually instead.</div>` : ''}
+            </div>
+        `;
+    }).join('');
+
+    box.innerHTML = `
+        <div>Found <strong>${items.length}</strong> income entries:</div>
+        ${rows}
+        <div class="ai-suggestion-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="aiIncomeSaveAllBtn">Save All</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="aiIncomeDismissBtn">Dismiss</button>
+        </div>
+    `;
+    box.style.display = 'block';
+
+    document.getElementById('aiIncomeDismissBtn').addEventListener('click', () => {
+        box.style.display = 'none';
+    });
+    document.getElementById('aiIncomeSaveAllBtn').addEventListener('click', handleSaveAllIncomeBulk);
+}
+
+/**
+ * Save every checked row from the income bulk preview as its own inflow,
+ * using each row's own (possibly edited) date, amount, and AI-assigned category.
+ */
+async function handleSaveAllIncomeBulk() {
+    const saveBtn = document.getElementById('aiIncomeSaveAllBtn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    let saved = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (let i = 0; i < aiIncomeBulkItems.length; i++) {
+        const checkbox = document.querySelector(`.ai-income-bulk-include[data-index="${i}"]`);
+        if (!checkbox || !checkbox.checked) {
+            skipped++;
+            continue;
+        }
+
+        const item = aiIncomeBulkItems[i];
+        const amount = parseFloat(document.querySelector(`.ai-income-bulk-amount[data-index="${i}"]`).value);
+        const date = document.querySelector(`.ai-income-bulk-date[data-index="${i}"]`).value;
+
+        if (!amount || !date || !item.category_id) {
+            failed++;
+            continue;
+        }
+
+        const formData = {
+            date: `${date}T00:00`,
+            amount: amount,
+            category_id: item.category_id,
+            notes: item.notes || null
+        };
+
+        try {
+            await apiPost('/inflows', formData);
+            saved++;
+        } catch (error) {
+            console.error('Error saving bulk inflow:', error);
+            failed++;
+        }
+    }
+
+    saveBtn.disabled = false;
+    saveBtn.textContent = 'Save All';
+
+    let message = `✅ Saved ${saved} inflow${saved === 1 ? '' : 's'}.`;
+    if (skipped) message += ` ${skipped} unchecked.`;
+    if (failed) message += ` ${failed} need manual entry.`;
+    showStatus('inflowFormStatus', message, failed ? 'warning' : 'success');
+
+    if (failed === 0) {
+        document.getElementById('aiIncomeSuggestion').style.display = 'none';
+        resetAiIncomeAssist();
+    }
+    await loadInflows();
+}
+
+/**
+ * Handle the income AI Assist form submit: send text to the backend and
+ * render whatever suggestion(s) (or friendly error) comes back
+ */
+async function handleAiIncomeCategorize(event) {
+    event.preventDefault();
+
+    const text = document.getElementById('aiIncomeText').value.trim();
+    document.getElementById('aiIncomeSuggestion').style.display = 'none';
+
+    if (!isOnline) {
+        showStatus('aiIncomeStatus', 'AI Assist needs an internet connection. Pick a category manually while offline.', 'warning');
+        return;
+    }
+    if (!text) {
+        showStatus('aiIncomeStatus', 'Type or speak a description first.', 'warning');
+        return;
+    }
+
+    const submitBtn = document.querySelector('#aiIncomeAssistForm button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Thinking...';
+
+    try {
+        const result = await apiPost('/ai/categorize-income', { text });
+        const suggestions = result.suggestions || [];
+        if (suggestions.length > 1) {
+            renderAiIncomeBulkSuggestions(suggestions);
+        } else {
+            renderAiIncomeSuggestion(suggestions[0] || null);
+        }
+    } catch (error) {
+        console.error('AI categorize error:', error);
+        const message = /usage limit/i.test(error.message)
+            ? error.message
+            : 'AI categorization is unavailable right now. Pick a category manually.';
+        showStatus('aiIncomeStatus', message, 'warning');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Suggest category';
     }
 }
 
@@ -1894,7 +2113,7 @@ document.addEventListener('DOMContentLoaded', () => {
         aiSelectedImageFile = e.target.files[0] || null;
         document.getElementById('aiImageFileName').textContent = aiSelectedImageFile ? aiSelectedImageFile.name : '';
     });
-    setupAiSpeechRecognition();
+    setupSpeechRecognitionButton('aiMicBtn', 'aiText', 'aiStatus');
     
     // C1 category change -> load C2
     document.getElementById('expenseC1').addEventListener('change', (e) => {
@@ -2001,8 +2220,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('clearInflowFormBtn').addEventListener('click', () => {
         document.getElementById('inflowForm').reset();
         setDefaultInflowDateTime();
+        resetAiIncomeAssist();
     });
-    
+
+    // AI Assist (Income)
+    document.getElementById('aiIncomeAssistForm').addEventListener('submit', handleAiIncomeCategorize);
+    setupSpeechRecognitionButton('aiIncomeMicBtn', 'aiIncomeText', 'aiIncomeStatus');
+
     // Add income category button
     document.getElementById('addIncomeCatBtn').addEventListener('click', () => {
         document.getElementById('addIncomeCatModal').classList.add('active');

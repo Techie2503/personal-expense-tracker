@@ -1,10 +1,11 @@
 """
-Gemini-based AI expense categorization.
-Given a free-text description and/or a receipt/screenshot image, asks Gemini
-to pick the best-fit Category1/Category2 pair from the user's own live
-taxonomy (never invented) for each distinct expense described - one input can
-describe a single expense or a list of several (e.g. a shopping list or a
-multi-line receipt) - extracting amount/date/merchant when present.
+Gemini-based AI expense/income categorization.
+Given a free-text description (and, for expenses, an optional receipt/
+screenshot image), asks Gemini to pick the best-fit category from the
+user's own live taxonomy (never invented) for each distinct expense or
+income entry described - one input can describe a single entry or a list
+of several (e.g. a shopping list, a multi-line receipt, or "got 5000
+salary and 200 cashback") - extracting amount/date/merchant when present.
 Runs a categorize -> reflect two-step pass: the second call is shown the
 first call's own answer and asked to double-check it against the taxonomy.
 """
@@ -39,6 +40,19 @@ class ExpenseSuggestionBatch(BaseModel):
     items: List[ExpenseSuggestion]
 
 
+class IncomeSuggestion(BaseModel):
+    category_name: str
+    confidence: float
+    amount: Optional[float] = None
+    date: Optional[str] = None
+    notes: Optional[str] = None
+    reasoning: str
+
+
+class IncomeSuggestionBatch(BaseModel):
+    items: List[IncomeSuggestion]
+
+
 class RateLimitedError(Exception):
     """Raised when the Gemini free-tier quota is exhausted (HTTP 429)."""
 
@@ -56,10 +70,10 @@ class GeminiService:
             for c1_name, c2_names in taxonomy.items()
         )
 
-    def _call(self, parts: list) -> Optional[List[ExpenseSuggestion]]:
+    def _call(self, parts: list, batch_cls: type) -> Optional[list]:
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=ExpenseSuggestionBatch,
+            response_schema=batch_cls,
         )
         try:
             response = self._client.models.generate_content(
@@ -77,7 +91,7 @@ class GeminiService:
             return None
 
         parsed = response.parsed
-        return parsed.items if isinstance(parsed, ExpenseSuggestionBatch) else None
+        return parsed.items if isinstance(parsed, batch_cls) else None
 
     def categorize_expenses(
         self,
@@ -125,7 +139,11 @@ class GeminiService:
                 "guess.\n"
                 "Only fill person if the input explicitly names who the "
                 "expense is for/with (e.g. \"for mom\", \"split with "
-                "roommate\") - leave it null otherwise."
+                "roommate\") - leave it null otherwise.\n"
+                "Always fill notes with a short description of the item "
+                "itself (e.g. \"curd\", \"coffee at Starbucks\") - derive it "
+                "from the input text or receipt, this field should never be "
+                "left null."
             ))
         ]
         if text:
@@ -140,7 +158,7 @@ class GeminiService:
 
         step1 = self._call(base_parts + [
             types.Part.from_text(text="Return your best category picks now as JSON.")
-        ])
+        ], ExpenseSuggestionBatch)
         if not step1:
             return []
 
@@ -154,7 +172,64 @@ class GeminiService:
                 "low-confidence guess, correct it. Return your final JSON answer "
                 "with the same number of items."
             ))
-        ])
+        ], ExpenseSuggestionBatch)
+        return step2 or step1
+
+    def categorize_income(
+        self,
+        categories: List[str],
+        text: Optional[str] = None,
+    ) -> List[IncomeSuggestion]:
+        """
+        categories: flat list of the user's own live income category names
+        (income categories have no C1/C2 hierarchy, unlike expenses).
+        Returns one IncomeSuggestion per distinct income entry found in the
+        input - e.g. "got 5000 salary and 200 cashback" returns two entries.
+        Raises RateLimitedError on Gemini quota exhaustion; returns [] on any
+        other failure or unusable input, so callers always have a
+        manual-categorization fallback.
+        """
+        if not self._client or not text:
+            return []
+
+        categories_text = ", ".join(categories)
+        base_parts = [
+            types.Part.from_text(text=(
+                "You categorize personal income/cash-inflow entries for a "
+                "budgeting app. The input may describe a single inflow, or "
+                "several separate ones (e.g. \"got 5000 salary and 200 "
+                "cashback\") - return one entry in `items` per distinct "
+                "inflow; a single inflow still returns exactly one entry.\n"
+                "For each entry, pick exactly one category_name from this "
+                "user-defined list - never invent a category that isn't "
+                f"listed here: {categories_text}\n\n"
+                "Extract the amount and date (ISO 8601 if determinable) for "
+                "each entry from the text.\n"
+                "Always fill notes with a short description of the entry "
+                "itself (e.g. \"Salary\", \"Cashback from credit card\") - "
+                "derive it from the input text, this field should never be "
+                "left null."
+            )),
+            types.Part.from_text(text=f"Income description: {text}"),
+        ]
+
+        step1 = self._call(base_parts + [
+            types.Part.from_text(text="Return your best category picks now as JSON.")
+        ], IncomeSuggestionBatch)
+        if not step1:
+            return []
+
+        step1_batch = IncomeSuggestionBatch(items=step1)
+        step2 = self._call(base_parts + [
+            types.Part.from_text(text=(
+                "Your first pass categorized these income entries as: "
+                f"{step1_batch.model_dump_json()}\n"
+                "Re-check each pick strictly against the allowed category "
+                "list above. If any is a poor fit or an invented category, "
+                "correct it. Return your final JSON answer with the same "
+                "number of items."
+            ))
+        ], IncomeSuggestionBatch)
         return step2 or step1
 
 
